@@ -1,0 +1,2 @@
+ALTER TABLE `ManualMomoAccount`
+  ADD COLUMN `bankNameTelco` VARCHAR(120) NOT NULL DEFAULT '';

@@ -1,0 +1,13 @@
+ALTER TABLE `User`
+  MODIFY `role` ENUM(
+    'OWNER',
+    'MANAGER',
+    'GOLD_RECEIVER',
+    'SALES_OFFICER',
+    'INVENTORY_OFFICER',
+    'AUDITOR',
+    'TRADER',
+    'ACCOUNTANT',
+    'VIEWER'
+  ) NOT NULL DEFAULT 'TRADER',
+  ADD COLUMN `permissions` JSON NULL;

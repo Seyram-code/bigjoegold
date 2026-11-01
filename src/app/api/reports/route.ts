@@ -1,0 +1,568 @@
+import { Prisma } from "@prisma/client";
+import { can, requireUser } from "@/lib/authz";
+import { boardPriceUnitLabel } from "@/lib/board-prices";
+import { formatPriceAmount } from "@/lib/formatters";
+import { formatDecimalTruncated } from "@/lib/decimal-policy";
+import { apiError, HttpError } from "@/lib/http";
+import { prisma } from "@/lib/prisma";
+
+const zero = () => new Prisma.Decimal(0);
+
+function parseDateRange(request: Request) {
+  const search = new URL(request.url).searchParams;
+  const today = new Date();
+  const fromValue = search.get("from");
+  const toValue = search.get("to");
+  const from = fromValue
+    ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(fromValue) ? `${fromValue}T00:00:00.000Z` : fromValue)
+    : new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const to = toValue
+    ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(toValue) ? `${toValue}T23:59:59.999Z` : toValue)
+    : today;
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from > to) {
+    throw new HttpError("Provide a valid date range", 400);
+  }
+  if (toValue && /^\d{4}-\d{2}-\d{2}$/.test(toValue)) to.setUTCHours(23, 59, 59, 999);
+  return { from, to };
+}
+
+function sumAmounts<T extends { amount: Prisma.Decimal }>(items: T[]) {
+  return items.reduce((sum, item) => sum.plus(item.amount), zero());
+}
+
+export async function GET(request: Request) {
+  try {
+    const user = await requireUser("reports:read");
+    const { from, to } = parseDateRange(request);
+    const readInventory = can(user.role, "inventory:read", user.permissions);
+    const readPayments = can(user.role, "payments:read", user.permissions);
+    const readBoard = can(user.role, "board:read", user.permissions);
+    const readStaff = can(user.role, "staff:read", user.permissions);
+    const readCustomerDetails = can(user.role, "customers:personal:read", user.permissions);
+
+    const [
+      trades,
+      inventoryLots,
+      payments,
+      cashMovements,
+      stockMovements,
+      boardPrices,
+      allOpenTrades,
+      financingPayments,
+      advanceFulfillments,
+      buyerFinanceSettlements,
+      customerAdvanceAccounts,
+      buyerFinanceAccounts,
+      paymentAccounts,
+    ] = await Promise.all([
+      prisma.trade.findMany({
+        where: {
+          transactionDate: { gte: from, lte: to },
+          OR: [
+            { type: "PURCHASE", status: "POSTED" },
+            { type: "SALE", status: { in: ["POSTED", "RETURNED"] } },
+          ],
+        },
+        orderBy: { transactionDate: "asc" },
+        select: {
+          id: true,
+          reference: true,
+          type: true,
+          status: true,
+          totalAmount: true,
+          costBasis: true,
+          quantityKg: true,
+          purityBps: true,
+          transactionDate: true,
+          customer: { select: { id: true, code: true, name: true } },
+          createdBy: { select: { name: true } },
+          payments: { select: { amount: true, direction: true } },
+          advanceFulfillment: { select: { amount: true } },
+          buyerFinanceSettlement: { select: { amount: true } },
+          corrections: {
+            select: {
+              quantityGrams: true,
+              creditAmount: true,
+              refundAmount: true,
+              allocations: {
+                select: { grams: true, lot: { select: { costPerGram: true } } },
+              },
+            },
+          },
+        },
+      }),
+      readInventory
+        ? prisma.inventoryLot.findMany({
+          where: { remainingGrams: { gt: 0 } },
+          orderBy: [{ batchNumber: "asc" }, { receivedAt: "asc" }],
+          include: { storageLocation: { select: { name: true } } },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.payment.findMany({
+          where: { paidAt: { gte: from, lte: to } },
+          orderBy: { paidAt: "asc" },
+          select: {
+            id: true,
+            reference: true,
+            direction: true,
+            amount: true,
+            method: true,
+            paidAt: true,
+            note: true,
+            customer: { select: { name: true } },
+            trade: { select: { reference: true, type: true } },
+            cashAccount: { select: { id: true, name: true } },
+            createdBy: { select: { name: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.cashMovement.findMany({
+          where: { movementDate: { gte: from, lte: to } },
+          orderBy: { movementDate: "asc" },
+          select: {
+            id: true,
+            reference: true,
+            type: true,
+            direction: true,
+            amount: true,
+            movementDate: true,
+            description: true,
+            approvalStatus: true,
+            account: { select: { name: true, currency: true } },
+            createdBy: { select: { name: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readInventory
+        ? prisma.stockMovement.findMany({
+          where: { movementDate: { gte: from, lte: to } },
+          orderBy: { movementDate: "asc" },
+          select: {
+            id: true,
+            reference: true,
+            type: true,
+            quantityGrams: true,
+            movementDate: true,
+            reason: true,
+            inventoryLot: { select: { batchNumber: true } },
+            location: { select: { name: true } },
+            fromLocation: { select: { name: true } },
+            toLocation: { select: { name: true } },
+            createdBy: { select: { name: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readBoard
+        ? prisma.goldBoardPrice.findMany({
+          where: { effectiveAt: { gte: from, lte: to } },
+          orderBy: { effectiveAt: "asc" },
+          select: {
+            id: true,
+            priceType: true,
+            priceAmount: true,
+            currency: true,
+            priceUnit: true,
+            source: true,
+            note: true,
+            effectiveAt: true,
+            createdBy: { select: { name: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.trade.findMany({
+          where: { status: { in: ["POSTED", "RETURNED"] } },
+          select: {
+            id: true,
+            reference: true,
+            type: true,
+            totalAmount: true,
+            customer: { select: { name: true } },
+            payments: { select: { amount: true, direction: true } },
+            advanceFulfillment: { select: { amount: true } },
+            buyerFinanceSettlement: { select: { amount: true } },
+            corrections: { select: { creditAmount: true, refundAmount: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.payment.findMany({
+          where: {
+            paidAt: { gte: from, lte: to },
+            OR: [{ customerAdvanceId: { not: null } }, { buyerFinanceAccountId: { not: null } }],
+          },
+          orderBy: [{ paidAt: "asc" }, { id: "asc" }],
+          select: {
+            id: true,
+            reference: true,
+            direction: true,
+            amount: true,
+            paidAt: true,
+            customer: { select: { id: true, name: true } },
+            customerAdvance: { select: { reference: true } },
+            buyerFinanceAccount: { select: { reference: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.advanceFulfillment.findMany({
+          where: { createdAt: { gte: from, lte: to } },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: {
+            id: true,
+            reference: true,
+            amount: true,
+            createdAt: true,
+            request: {
+              select: {
+                advance: {
+                  select: {
+                    reference: true,
+                    customer: { select: { id: true, name: true } },
+                  },
+                },
+              },
+            },
+            trade: { select: { reference: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.buyerFinanceSettlement.findMany({
+          where: { createdAt: { gte: from, lte: to } },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: {
+            id: true,
+            reference: true,
+            amount: true,
+            createdAt: true,
+            account: {
+              select: {
+                reference: true,
+                customer: { select: { id: true, name: true } },
+              },
+            },
+            trade: { select: { reference: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.customerAdvance.findMany({
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: {
+            id: true,
+            reference: true,
+            customer: { select: { id: true, name: true } },
+            payments: { select: { amount: true, direction: true } },
+            requests: { select: { fulfillments: { select: { amount: true } } } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.buyerFinanceAccount.findMany({
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: {
+            id: true,
+            reference: true,
+            customer: { select: { id: true, name: true } },
+            payments: { select: { amount: true, direction: true } },
+            settlements: { select: { amount: true } },
+          },
+        })
+        : Promise.resolve(null),
+      readPayments
+        ? prisma.cashAccount.findMany({
+          orderBy: [{ isActive: "desc" }, { name: "asc" }],
+          select: { id: true, name: true, type: true, currency: true, isActive: true },
+        })
+        : Promise.resolve(null),
+    ]);
+
+    const financingRows = readPayments ? [
+      ...(financingPayments ?? []).map((payment) => {
+        const isCustomerAdvance = Boolean(payment.customerAdvance);
+        const isOutbound = payment.direction === "OUTBOUND";
+        return {
+          id: payment.id,
+          date: payment.paidAt.toISOString(),
+          type: isCustomerAdvance ? "Customer gold advance" : "Buyer gold financing",
+          accountReference: payment.customerAdvance?.reference ?? payment.buyerFinanceAccount?.reference ?? "",
+          reference: payment.reference,
+          relatedReference: "",
+          activity: isCustomerAdvance
+            ? isOutbound ? "Refund paid" : "Funds received"
+            : isOutbound ? "Cash advance paid" : "Cash returned",
+          amount: payment.amount.toNumber(),
+          customerId: can(user.role, "customers:read", user.permissions) ? payment.customer?.id ?? null : null,
+          customer: readCustomerDetails ? payment.customer?.name ?? "Unspecified" : payment.customer ? "Restricted customer" : "Unspecified",
+        };
+      }),
+      ...(advanceFulfillments ?? []).map((fulfillment) => ({
+        id: fulfillment.id,
+        date: fulfillment.createdAt.toISOString(),
+        type: "Customer gold advance",
+        accountReference: fulfillment.request.advance.reference,
+        reference: fulfillment.reference,
+        relatedReference: fulfillment.trade.reference,
+        activity: "Gold released",
+        amount: fulfillment.amount.toNumber(),
+        customerId: can(user.role, "customers:read", user.permissions) ? fulfillment.request.advance.customer.id : null,
+        customer: readCustomerDetails ? fulfillment.request.advance.customer.name : "Restricted customer",
+      })),
+      ...(buyerFinanceSettlements ?? []).map((settlement) => ({
+        id: settlement.id,
+        date: settlement.createdAt.toISOString(),
+        type: "Buyer gold financing",
+        accountReference: settlement.account.reference,
+        reference: settlement.reference,
+        relatedReference: settlement.trade.reference,
+        activity: "Gold purchase settled",
+        amount: settlement.amount.toNumber(),
+        customerId: can(user.role, "customers:read", user.permissions) ? settlement.account.customer.id : null,
+        customer: readCustomerDetails ? settlement.account.customer.name : "Restricted customer",
+      })),
+    ].sort((left, right) => left.date.localeCompare(right.date)) : null;
+    const financingAccounts = readPayments ? [
+      ...(customerAdvanceAccounts ?? []).map((account) => {
+        const received = account.payments.filter((payment) => payment.direction === "INBOUND")
+          .reduce((sum, payment) => sum.plus(payment.amount), zero());
+        const refunded = account.payments.filter((payment) => payment.direction === "OUTBOUND")
+          .reduce((sum, payment) => sum.plus(payment.amount), zero());
+        const fulfilled = account.requests.flatMap((request) => request.fulfillments)
+          .reduce((sum, fulfillment) => sum.plus(fulfillment.amount), zero());
+        return {
+          id: account.id,
+          type: "Customer gold advance",
+          accountReference: account.reference,
+          customerId: can(user.role, "customers:read", user.permissions) ? account.customer.id : null,
+          customer: readCustomerDetails ? account.customer.name : "Restricted customer",
+          balance: received.minus(refunded).minus(fulfilled).toNumber(),
+          balanceMeaning: "Customer credit remaining",
+        };
+      }),
+      ...(buyerFinanceAccounts ?? []).map((account) => {
+        const payouts = account.payments.reduce((sum, payment) => sum.plus(
+          payment.direction === "OUTBOUND" ? payment.amount : payment.amount.negated(),
+        ), zero());
+        const settlements = account.settlements.reduce((sum, settlement) => sum.plus(settlement.amount), zero());
+        return {
+          id: account.id,
+          type: "Buyer gold financing",
+          accountReference: account.reference,
+          customerId: can(user.role, "customers:read", user.permissions) ? account.customer.id : null,
+          customer: readCustomerDetails ? account.customer.name : "Restricted customer",
+          balance: payouts.minus(settlements).toNumber(),
+          balanceMeaning: "Positive: customer owes Big Joe; negative: Big Joe owes customer",
+        };
+      }),
+    ].sort((left, right) => left.customer.localeCompare(right.customer)) : null;
+
+    const tradeRows = trades.map((trade) => {
+      const credits = trade.corrections.reduce((sum, correction) => sum.plus(correction.creditAmount), zero());
+      const returnedGrams = trade.corrections.reduce((sum, correction) => sum.plus(correction.quantityGrams), zero());
+      const paid = trade.payments
+        .filter((payment) => payment.direction === (trade.type === "SALE" ? "INBOUND" : "OUTBOUND"))
+        .reduce((sum, payment) => sum.plus(payment.amount), zero());
+      const totalPaid = paid.plus(trade.type === "SALE"
+        ? trade.advanceFulfillment?.amount ?? 0
+        : trade.buyerFinanceSettlement?.amount ?? 0);
+      const adjustedAmount = Prisma.Decimal.max(zero(), new Prisma.Decimal(trade.totalAmount).minus(credits));
+      const balance = trade.type === "SALE"
+        ? Prisma.Decimal.max(zero(), adjustedAmount.minus(totalPaid).plus(
+          trade.corrections.reduce((sum, correction) => sum.plus(correction.refundAmount), zero()),
+        ))
+        : Prisma.Decimal.max(zero(), adjustedAmount.minus(totalPaid));
+      return {
+        id: trade.id,
+        reference: trade.reference,
+        type: trade.type,
+        status: trade.status,
+        transactionDate: trade.transactionDate.toISOString(),
+        quantityKg: Math.max(0, new Prisma.Decimal(trade.quantityKg).minus(returnedGrams.div(1000)).toNumber()),
+        purityBps: trade.purityBps,
+        karat: Number(formatDecimalTruncated((trade.purityBps / 10000) * 24, 2)),
+        totalAmount: trade.totalAmount.toNumber(),
+        netAmount: adjustedAmount.toNumber(),
+        costBasis: trade.costBasis.toNumber(),
+        paidAmount: totalPaid.toNumber(),
+        balance: balance.toNumber(),
+        customerId: readCustomerDetails ? trade.customer?.id ?? null : null,
+        customer: readCustomerDetails ? trade.customer?.name ?? "Unspecified" : trade.customer ? "Restricted customer" : "Unspecified",
+        customerCode: readCustomerDetails ? trade.customer?.code ?? "" : "",
+        createdBy: readStaff ? trade.createdBy.name : "",
+      };
+    });
+
+    const sales = trades.filter((trade) => trade.type === "SALE");
+    const purchases = trades.filter((trade) => trade.type === "PURCHASE");
+    const salesValue = sales.reduce((sum, trade) => sum.plus(trade.totalAmount)
+      .minus(trade.corrections.reduce((credit, correction) => credit.plus(correction.creditAmount), zero())), zero());
+    const purchaseValue = purchases.reduce((sum, trade) => sum.plus(trade.totalAmount), zero());
+    const costOfSales = sales.reduce((sum, trade) => {
+      const returnedCost = trade.corrections.reduce((correctionSum, correction) =>
+        correctionSum.plus(correction.allocations.reduce((allocationSum, allocation) =>
+          allocationSum.plus(new Prisma.Decimal(allocation.grams).mul(allocation.lot.costPerGram)), zero())), zero());
+      return sum.plus(Prisma.Decimal.max(zero(), new Prisma.Decimal(trade.costBasis).minus(returnedCost)));
+    }, zero());
+    const inbound = (payments ?? []).filter((payment) => payment.direction === "INBOUND");
+    const outbound = (payments ?? []).filter((payment) => payment.direction === "OUTBOUND");
+    const cashIn = sumAmounts(inbound);
+    const cashOut = sumAmounts(outbound);
+    const costBasisComplete = sales.every((trade) => new Prisma.Decimal(trade.costBasis).greaterThan(0));
+    const profit = costBasisComplete ? salesValue.minus(costOfSales).toNumber() : null;
+
+    const inventoryRows = inventoryLots?.map((lot) => ({
+      id: lot.id,
+      batchNumber: lot.batchNumber || "Unassigned",
+      source: lot.source || "Unspecified",
+      receivedAt: lot.receivedAt.toISOString(),
+      remainingGrams: lot.remainingGrams.toNumber(),
+      remainingKg: lot.remainingGrams.div(1000).toNumber(),
+      purityBps: lot.purityBps,
+      karat: Number(formatDecimalTruncated((lot.purityBps / 10000) * 24, 2)),
+      costPerGram: lot.costPerGram.toNumber(),
+      bookValue: lot.remainingGrams.mul(lot.costPerGram).toNumber(),
+      status: lot.status,
+      location: lot.storageLocation?.name ?? "Unassigned",
+    })) ?? null;
+    const inventoryValue = inventoryLots?.reduce((sum, lot) =>
+      sum.plus(lot.remainingGrams.mul(lot.costPerGram)), zero()).toNumber() ?? null;
+
+    const outstandingTrades = allOpenTrades?.map((trade) => {
+      const paid = trade.payments
+        .filter((payment) => payment.direction === (trade.type === "SALE" ? "INBOUND" : "OUTBOUND"))
+        .reduce((sum, payment) => sum.plus(payment.amount), zero());
+      const totalPaid = paid.plus(trade.type === "SALE"
+        ? trade.advanceFulfillment?.amount ?? 0
+        : trade.buyerFinanceSettlement?.amount ?? 0);
+      const credit = trade.corrections.reduce((sum, correction) => sum.plus(correction.creditAmount), zero());
+      const refund = trade.corrections.reduce((sum, correction) => sum.plus(correction.refundAmount), zero());
+      const balance = trade.type === "SALE"
+        ? Prisma.Decimal.max(zero(), new Prisma.Decimal(trade.totalAmount).minus(credit).minus(totalPaid).plus(refund))
+        : Prisma.Decimal.max(zero(), new Prisma.Decimal(trade.totalAmount).minus(totalPaid));
+      return {
+        id: trade.id,
+        reference: trade.reference,
+        type: trade.type,
+        customer: readCustomerDetails ? trade.customer?.name ?? "Unspecified" : trade.customer ? "Restricted customer" : "Unspecified",
+        amount: trade.totalAmount.toNumber(),
+        balance: balance.toNumber(),
+      };
+    }).filter((trade) => trade.balance > 0) ?? null;
+    const activity = readStaff ? [
+      ...trades.map((trade) => ({
+        date: trade.transactionDate.toISOString(),
+        staff: trade.createdBy.name,
+        activity: `${trade.type.toLowerCase()} recorded`,
+        reference: trade.reference,
+      })),
+      ...(payments ?? []).map((payment) => ({
+        date: payment.paidAt.toISOString(),
+        staff: payment.createdBy.name,
+        activity: `${payment.direction.toLowerCase()} payment recorded`,
+        reference: payment.reference,
+      })),
+      ...(stockMovements ?? []).map((movement) => ({
+        date: movement.movementDate.toISOString(),
+        staff: movement.createdBy.name,
+        activity: `stock ${movement.type.toLowerCase().replaceAll("_", " ")}`,
+        reference: movement.reference,
+      })),
+      ...(boardPrices ?? []).map((price) => ({
+        date: price.effectiveAt.toISOString(),
+        staff: price.createdBy.name,
+        activity: "board price published",
+        reference: price.id,
+      })),
+    ].sort((left, right) => left.date.localeCompare(right.date)) : null;
+
+    return Response.json({
+      period: { from: from.toISOString(), to: to.toISOString() },
+      totals: {
+        sales: salesValue.toNumber(),
+        purchases: purchaseValue.toNumber(),
+        costOfSales: costOfSales.toNumber(),
+        profit,
+        cashIn: cashIn.toNumber(),
+        cashOut: cashOut.toNumber(),
+        netCashFlow: cashIn.minus(cashOut).toNumber(),
+        purchasedKg: purchases.reduce((sum, trade) => sum + Number(trade.quantityKg), 0),
+        soldKg: tradeRows.filter((trade) => trade.type === "SALE").reduce((sum, trade) => sum + trade.quantityKg, 0),
+        tradeCount: trades.length,
+        inventoryValue,
+        inventoryKg: inventoryRows?.reduce((sum, lot) => sum + lot.remainingKg, 0) ?? null,
+      },
+      profitAvailability: {
+        costBasisComplete,
+        method: "Net sales value minus the recorded cost of gold sold or released.",
+        explanation: profit === null
+          ? "Profit is unavailable because a cost basis is missing for one or more sales."
+          : "Profit reflects the margin on gold sold or released; unsold stock is not counted as profit.",
+      },
+      trades: tradeRows,
+      inventory: inventoryRows,
+      payments: payments?.map((payment) => ({
+        id: payment.id,
+        reference: payment.reference,
+        direction: payment.direction,
+        amount: payment.amount.toNumber(),
+        method: payment.method,
+        accountId: payment.cashAccount?.id ?? null,
+        paidAt: payment.paidAt.toISOString(),
+        customer: readCustomerDetails ? payment.customer?.name ?? "Unspecified" : payment.customer ? "Restricted customer" : "Unspecified",
+        tradeReference: payment.trade?.reference ?? "",
+        tradeType: payment.trade?.type ?? "",
+        account: payment.cashAccount?.name ?? "Unassigned",
+        createdBy: readStaff ? payment.createdBy.name : "",
+        note: payment.note ?? "",
+      })) ?? null,
+      paymentAccounts,
+      outstandingTrades,
+      cashMovements: cashMovements?.map((movement) => ({
+        id: movement.id,
+        reference: movement.reference,
+        type: movement.type,
+        direction: movement.direction,
+        amount: movement.amount.toNumber(),
+        movementDate: movement.movementDate.toISOString(),
+        account: `${movement.account.name} (${movement.account.currency})`,
+        approvalStatus: movement.approvalStatus,
+        description: movement.description ?? "",
+        createdBy: readStaff ? movement.createdBy.name : "",
+      })) ?? null,
+      stockMovements: stockMovements?.map((movement) => ({
+        id: movement.id,
+        reference: movement.reference,
+        type: movement.type,
+        quantityGrams: movement.quantityGrams.toNumber(),
+        quantityKg: movement.quantityGrams.div(1000).toNumber(),
+        movementDate: movement.movementDate.toISOString(),
+        batchNumber: movement.inventoryLot?.batchNumber ?? "Unassigned",
+        location: movement.location?.name ?? "",
+        transfer: [movement.fromLocation?.name, movement.toLocation?.name].filter(Boolean).join(" -> "),
+        reason: movement.reason ?? "",
+        createdBy: readStaff ? movement.createdBy.name : "",
+      })) ?? null,
+      staffActivity: activity,
+      boardPrices: boardPrices?.map((price) => ({
+        id: price.id,
+        priceType: price.priceType,
+        effectiveAt: price.effectiveAt.toISOString(),
+        priceAmount: price.priceAmount.toNumber(),
+        quotedRate: `${formatPriceAmount(price.priceAmount.toString(), price.currency)} / ${boardPriceUnitLabel(price.priceUnit)}`,
+        direction: price.priceType === "RECEIVING" ? "Receiving stock" : "Releasing / selling",
+        currency: price.currency,
+        priceUnit: price.priceUnit,
+        source: price.source,
+        note: price.note ?? "",
+        createdBy: readStaff ? price.createdBy.name : "",
+      })) ?? null,
+      financing: financingRows,
+      financingAccounts,
+    });
+  } catch (error) {
+    return apiError(error);
+  }
+}
