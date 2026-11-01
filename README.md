@@ -52,6 +52,10 @@ For an existing installation, keep an owner signed in while applying the staff m
 
 Configure MySQL backups, access controls, TLS, and a strong authentication secret before storing real business records. Authentication and selected write/download APIs use database-backed rate limits.
 
+### Hostinger Git deployments
+
+For a Hostinger deployment, set `HOSTINGER_BUILD=1` in the website's environment variables. The build then applies pending Prisma migrations and runs the initial-owner seed; the seed does nothing once any staff account exists. Set `DATABASE_URL` and, for an empty database, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, and a strong `ADMIN_PASSWORD` (at least 12 characters) in Hostinger, not in Git. Local builds do not run migrations or seed data.
+
 ### Backup and restore
 
 - Schedule encrypted backups of the MySQL database and store copies outside the application host with access limited to administrators. Protect backup encryption keys separately from the backup files.
