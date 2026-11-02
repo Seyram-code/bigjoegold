@@ -17,6 +17,11 @@ export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "mysql" }),
   secret,
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: ["x-real-ip", "x-forwarded-for"],
+    },
+  },
   trustedOrigins: (request) => {
     if (process.env.NODE_ENV === "production") return [];
     const origin = request?.headers.get("origin");
