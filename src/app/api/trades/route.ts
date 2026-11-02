@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { addAudit, generateBatchNumber, reference } from "@/lib/records";
 import { assertPermission, can, requireUser } from "@/lib/authz";
@@ -8,6 +9,7 @@ import { tradeSchema } from "@/lib/validation";
 import { ledgerBalances, resolveStorageLocation } from "@/lib/inventory";
 import { recordPaymentMovement } from "@/lib/finance";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
+import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET(request: Request) {
   try {
@@ -187,6 +189,22 @@ export async function POST(request: Request) {
         include: { customer: { select: { name: true } }, payments: true },
       });
     });
+    if (trade.type === "SALE") {
+      const amountPaid = trade.payments
+        .filter((payment) => payment.direction === "INBOUND")
+        .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
+      after(async () => {
+        await sendOwnerTransactionEmail({
+          type: "SALE",
+          reference: trade.reference,
+          customerName: trade.customer?.name,
+          quantityKg: trade.quantityKg.toString(),
+          totalAmount: trade.totalAmount.toString(),
+          amountPaid: amountPaid.toString(),
+          recordedBy: user.name,
+        });
+      });
+    }
     return Response.json(trade, { status: 201 });
   } catch (error) {
     return apiError(error);

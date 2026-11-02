@@ -450,7 +450,11 @@ export async function correctSale(
     });
     return tx.saleCorrection.findUniqueOrThrow({
       where: { id: correction.id },
-      include: { allocations: { include: { lot: { include: { trade: { select: { reference: true } } } } } }, createdBy: { select: { name: true } } },
+      include: {
+        allocations: { include: { lot: { include: { trade: { select: { reference: true } } } } } },
+        createdBy: { select: { name: true } },
+        trade: { select: { reference: true, customer: { select: { name: true } } } },
+      },
     });
   });
 }

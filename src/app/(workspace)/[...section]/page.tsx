@@ -136,5 +136,5 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   if (view.module === "reports") return <ReportsDashboard />;
   const moduleKey = view.module as ModuleKey;
   const permission = writePermission[moduleKey];
-  return <OperationsPanel module={moduleKey} canWrite={permission ? Boolean(user && can(user.role, permission, user.permissions)) : false} canResetOwnerPassword={user?.role === "OWNER"} actorUserId={user?.id} view={view} />;
+  return <OperationsPanel module={moduleKey} canWrite={permission ? Boolean(user && can(user.role, permission, user.permissions)) : false} canResetOwnerPassword={user?.role === "OWNER"} canCreateOwner={user?.role === "OWNER"} actorUserId={user?.id} view={view} />;
 }

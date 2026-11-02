@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decryptStaffAccessCode, encryptStaffAccessCode, generateStaffAccessCode, generateStaffAuthEmail, hashStaffAccessCode, staffAccessCredentialPassword } from "../src/lib/staff";
-import { staffSchema } from "../src/lib/validation";
+import { ownerCreateSchema, staffSchema } from "../src/lib/validation";
 
 test("staff access codes use the company prefix and four random digits", () => {
   const code = generateStaffAccessCode();
@@ -44,4 +44,23 @@ test("staff creation requires name and phone but defaults role", () => {
     role: "TRADER",
   });
   assert.throws(() => staffSchema.parse({ name: "Ama Mensah" }));
+});
+
+test("owner creation requires valid email, phone, and matching strong passwords", () => {
+  const input = {
+    name: "Ama Mensah",
+    email: " ama@example.com ",
+    phone: "+233201234567",
+    password: "A-strong-owner-password",
+    confirmPassword: "A-strong-owner-password",
+  };
+  assert.deepEqual(ownerCreateSchema.parse(input), {
+    ...input,
+    name: "Ama Mensah",
+    email: "ama@example.com",
+    phone: "+233201234567",
+  });
+  assert.throws(() => ownerCreateSchema.parse({ ...input, confirmPassword: "a-different-password" }));
+  assert.throws(() => ownerCreateSchema.parse({ ...input, password: "short", confirmPassword: "short" }));
+  assert.throws(() => ownerCreateSchema.parse({ ...input, email: "invalid" }));
 });

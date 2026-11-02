@@ -1,10 +1,12 @@
 import { Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { requireUser } from "@/lib/authz";
 import { apiError, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { buyerFinanceSchema } from "@/lib/validation";
 import { calculateBuyerFinanceBalance, recordBuyerFinanceAdvance } from "@/lib/buyer-financing";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
+import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET(request: Request) {
   try {
@@ -52,6 +54,29 @@ export async function POST(request: Request) {
     await enforceUserRateLimit(user.id, "buyer-finance-write", { limit: 20 });
     const input = buyerFinanceSchema.parse(await readJson(request));
     const result = await recordBuyerFinanceAdvance(user.id, input);
+    after(async () => {
+      try {
+        const payment = await prisma.payment.findUniqueOrThrow({
+          where: { id: result.paymentId },
+          include: {
+            customer: { select: { name: true } },
+            buyerFinanceAccount: { select: { reference: true } },
+          },
+        });
+        await sendOwnerTransactionEmail({
+          type: "PAYMENT",
+          reference: payment.reference,
+          direction: payment.direction,
+          amount: payment.amount.toString(),
+          method: payment.method,
+          customerName: payment.customer?.name,
+          tradeReference: payment.buyerFinanceAccount?.reference,
+          recordedBy: user.name,
+        });
+      } catch (error) {
+        console.error("Buyer financing payment was saved, but its owner email notification could not be prepared.", error);
+      }
+    });
     return Response.json(result, { status: 201 });
   } catch (error) {
     return apiError(error);

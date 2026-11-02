@@ -381,6 +381,17 @@ export const staffSchema = z.object({
   permissions: z.array(z.string().trim().min(3).max(80)).max(64).optional(),
 }).strict();
 
+export const ownerCreateSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().toLowerCase().email().max(254),
+  phone: z.string().trim().min(6).max(40),
+  password: z.string().min(12).max(128),
+  confirmPassword: z.string().min(12).max(128),
+}).strict().refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
 export const staffUpdateSchema = z.object({
   role: z.enum(["OWNER", "MANAGER", "GOLD_RECEIVER", "SALES_OFFICER", "INVENTORY_OFFICER", "TRADER", "ACCOUNTANT", "AUDITOR", "VIEWER"]).optional(),
   permissions: z.array(z.string().trim().min(3).max(80)).max(64).optional(),

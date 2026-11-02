@@ -1,8 +1,10 @@
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { getLoginLock } from "@/lib/login-lockout";
+import { addAudit } from "@/lib/records";
+import { clearLoginFailures, getLoginLock } from "@/lib/login-lockout";
 import { prisma } from "@/lib/prisma";
+import { sendOwnerPasswordResetEmail } from "@/lib/email";
 
 const secret = process.env.BETTER_AUTH_SECRET;
 if (!secret || secret.length < 32) {
@@ -33,6 +35,7 @@ export const auth = betterAuth({
     max: 30,
     customRules: {
       "/sign-in/email": { window: 60, max: 5 },
+      "/request-password-reset": { window: 60, max: 3 },
     },
   },
   hooks: {
@@ -70,6 +73,45 @@ export const auth = betterAuth({
     disableSignUp: true,
     minPasswordLength: 12,
     autoSignIn: true,
+    resetPasswordTokenExpiresIn: 3600,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      const account = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { email: true, name: true, role: true, isActive: true },
+      });
+      if (!account || account.role !== "OWNER" || !account.isActive) return;
+      await sendOwnerPasswordResetEmail({ email: account.email, name: account.name, url });
+    },
+    onPasswordReset: async ({ user }) => {
+      let account: { role: string } | null;
+      try {
+        account = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { role: true },
+        });
+      } catch (error) {
+        console.error("Password reset succeeded, but its owner audit and lockout cleanup could not be completed.", error);
+        return;
+      }
+      if (account?.role !== "OWNER") return;
+      try {
+        await prisma.$transaction((tx) => addAudit(tx, {
+          userId: user.id,
+          action: "owner.password.reset.self_service",
+          entity: "User",
+          entityId: user.id,
+          details: { before: null, after: { passwordReset: true, method: "email" } },
+        }));
+      } catch (error) {
+        console.error("Owner password reset succeeded, but its audit entry could not be saved.", error);
+      }
+      try {
+        await clearLoginFailures(`user:${user.id}`);
+      } catch (error) {
+        console.error("Owner password reset succeeded, but login failure counters could not be cleared.", error);
+      }
+    },
   },
   user: {
     additionalFields: {

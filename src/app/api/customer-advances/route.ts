@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { requireUser, userCan } from "@/lib/authz";
 import { apiError, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,7 @@ import { postSale } from "@/lib/sales";
 import { recordCustomerAdvance } from "@/lib/customer-advances";
 import { customerAdvanceSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
+import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET(request: Request) {
   try {
@@ -98,9 +100,54 @@ export async function POST(request: Request) {
         allocations: input.allocations,
       };
       const sale = await postSale(user, saleInput, input.requestId);
+      after(async () => {
+        await sendOwnerTransactionEmail({
+          type: "SALE",
+          reference: sale.reference,
+          customerName: sale.customer?.name,
+          quantityKg: sale.quantityKg.toString(),
+          totalAmount: sale.totalAmount.toString(),
+          amountPaid: sale.paymentAmount.toString(),
+          recordedBy: user.name,
+        });
+      });
       return Response.json(sale, { status: 201 });
     }
     const result = await recordCustomerAdvance(user.id, input);
+    const paymentId = input.action === "CREATE_ADVANCE"
+      ? "paymentId" in result ? result.paymentId : null
+      : input.action === "ADD_FUNDS" || input.action === "REFUND"
+        ? "id" in result ? result.id : null
+        : null;
+    if (paymentId) {
+      after(async () => {
+        try {
+          const payment = await prisma.payment.findUniqueOrThrow({
+            where: { id: paymentId },
+            include: {
+              customer: { select: { name: true } },
+              trade: { select: { reference: true } },
+              customerAdvance: { select: { reference: true } },
+              buyerFinanceAccount: { select: { reference: true } },
+            },
+          });
+          await sendOwnerTransactionEmail({
+            type: "PAYMENT",
+            reference: payment.reference,
+            direction: payment.direction,
+            amount: payment.amount.toString(),
+            method: payment.method,
+            customerName: payment.customer?.name,
+            tradeReference: payment.trade?.reference
+              ?? payment.customerAdvance?.reference
+              ?? payment.buyerFinanceAccount?.reference,
+            recordedBy: user.name,
+          });
+        } catch (error) {
+          console.error("Customer advance payment was saved, but its owner email notification could not be prepared.", error);
+        }
+      });
+    }
     return Response.json(result, { status: input.action === "CREATE_ADVANCE" || input.action === "CREATE_REQUEST" ? 201 : 200 });
   } catch (error) {
     return apiError(error);

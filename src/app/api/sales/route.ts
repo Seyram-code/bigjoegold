@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { requireUser } from "@/lib/authz";
 import { apiError, HttpError, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,7 @@ import { postSale } from "@/lib/sales";
 import { saleSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { saleConfirmationSms, sendOwnerSms } from "@/lib/sms";
+import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET(request: Request) {
   try {
@@ -97,14 +99,25 @@ export async function POST(request: Request) {
     await enforceUserRateLimit(user.id, "sale-post", { limit: 20 });
     const input = saleSchema.parse(await readJson(request));
     const sale = await postSale(user, input);
-    await sendOwnerSms(saleConfirmationSms({
-      reference: sale.reference,
-      customerName: sale.customer?.name,
-      quantityKg: sale.quantityKg.toString(),
-      totalAmount: sale.totalAmount.toString(),
-      amountPaid: sale.paymentAmount.toString(),
-      recordedBy: user.name,
-    }));
+    after(async () => {
+      await sendOwnerSms(saleConfirmationSms({
+        reference: sale.reference,
+        customerName: sale.customer?.name,
+        quantityKg: sale.quantityKg.toString(),
+        totalAmount: sale.totalAmount.toString(),
+        amountPaid: sale.paymentAmount.toString(),
+        recordedBy: user.name,
+      }));
+      await sendOwnerTransactionEmail({
+        type: "SALE",
+        reference: sale.reference,
+        customerName: sale.customer?.name,
+        quantityKg: sale.quantityKg.toString(),
+        totalAmount: sale.totalAmount.toString(),
+        amountPaid: sale.paymentAmount.toString(),
+        recordedBy: user.name,
+      });
+    });
     return Response.json(sale, { status: 201 });
   } catch (error) {
     return apiError(error);

@@ -17,7 +17,7 @@ import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { SearchInput } from "@/components/ui/search-input";
 import { CustomerAutocomplete } from "@/components/ui/customer-autocomplete";
 import { PaymentProcessingOverlay } from "@/components/ui/payment-processing-overlay";
-import { customerSchema, tradeSchema, paymentSchema, staffSchema } from "@/lib/validation";
+import { customerSchema, tradeSchema, paymentSchema, staffSchema, ownerCreateSchema } from "@/lib/validation";
 import { formatCurrency, formatPriceAmount, formatWeight } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
@@ -153,7 +153,7 @@ const defaultValues: Partial<Record<ModuleKey, Record<string, string>>> = {
   staff: { name: "", phone: "", role: "TRADER" },
 };
 
-export function OperationsPanel({ module, canWrite, canResetOwnerPassword = false, actorUserId, view }: { module: ModuleKey; canWrite: boolean; canResetOwnerPassword?: boolean; actorUserId?: string; view?: WorkspaceView }) {
+export function OperationsPanel({ module, canWrite, canResetOwnerPassword = false, canCreateOwner = false, actorUserId, view }: { module: ModuleKey; canWrite: boolean; canResetOwnerPassword?: boolean; canCreateOwner?: boolean; actorUserId?: string; view?: WorkspaceView }) {
   const info = moduleInfo[module];
   const spec = formSpecs[module];
   const [rows, setRows] = useState<Row[]>([]);
@@ -173,6 +173,9 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
   const [editingPermissions, setEditingPermissions] = useState<{ id: string; values: Permission[] } | null>(null);
   const [staffActionBusy, setStaffActionBusy] = useState(false);
   const [showForm, setShowForm] = useState(view?.openForm ?? false);
+  const [showOwnerForm, setShowOwnerForm] = useState(false);
+  const [ownerForm, setOwnerForm] = useState({ name: "", email: "", phone: "", password: "", confirmPassword: "" });
+  const [ownerFormBusy, setOwnerFormBusy] = useState(false);
   const { success: showToast } = useToast();
   const [reportFrom, setReportFrom] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
   const [reportTo, setReportTo] = useState(() => new Date().toISOString().slice(0, 10));
@@ -277,6 +280,7 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
       }
       setEditing(null);
       form.reset(defaultValues[module] ?? {});
+      if (module === "staff") setShowForm(false);
       await load();
     } catch (cause) {
       if (cause instanceof ZodError) {
@@ -287,6 +291,34 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
         return;
       }
       setError(cause instanceof Error ? cause.message : "Unable to save this record");
+    }
+  }
+
+  async function submitOwner() {
+    setError("");
+    try {
+      const input = ownerCreateSchema.parse(ownerForm);
+      setOwnerFormBusy(true);
+      const response = await fetch("/api/staff/owners", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(readMessage(body, "Unable to create owner account"));
+      setOwnerForm({ name: "", email: "", phone: "", password: "", confirmPassword: "" });
+      setShowOwnerForm(false);
+      showToast("Owner account created. Share the sign-in email and password securely.");
+      await load();
+    } catch (cause) {
+      if (cause instanceof ZodError) {
+        const message = cause.issues[0]?.message;
+        setError(message ?? "Check the owner account details and try again.");
+      } else {
+        setError(cause instanceof Error ? cause.message : "Unable to create owner account");
+      }
+    } finally {
+      setOwnerFormBusy(false);
     }
   }
 
@@ -431,7 +463,8 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
       <div><p className="text-xs font-medium text-[#8b949e]">Workspace / {view?.label ?? info.title}</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-[#17212f]">{view?.label ?? info.title}</h1><p className="mt-1.5 max-w-2xl text-sm text-[#76808c]">{view?.notice ?? info.description}</p></div>
       <div className="flex items-center gap-2">
         <RefreshButton loading={loading} onClick={() => { setLoading(true); void load(); }} />
-        {spec && canWrite && <Button variant="gold" size="sm" onClick={() => { setEditing(null); setShowForm((value) => !value); }}><Plus size={14} /> {showForm ? "Close form" : view?.tradeType === "SALE" ? "New sale" : view?.tradeType === "PURCHASE" ? "Receive stock" : module === "customers" ? "New customer" : module === "trades" ? "New trade" : module === "staff" ? "Add staff" : module === "board-prices" ? "Publish rate" : "Record payment"}</Button>}
+        {spec && canWrite && <Button variant="gold" size="sm" onClick={() => { setEditing(null); if (module === "staff") setShowOwnerForm(false); setShowForm((value) => !value); }}><Plus size={14} /> {showForm ? "Close form" : view?.tradeType === "SALE" ? "New sale" : view?.tradeType === "PURCHASE" ? "Receive stock" : module === "customers" ? "New customer" : module === "trades" ? "New trade" : module === "staff" ? "Add staff" : module === "board-prices" ? "Publish rate" : "Record payment"}</Button>}
+        {module === "staff" && canCreateOwner && <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setShowOwnerForm((value) => !value); }}><Plus size={14} /> {showOwnerForm ? "Close owner form" : "Add owner"}</Button>}
       </div>
     </div>
 
@@ -443,7 +476,19 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
     {module === "reports" && summary && <p className="rounded-lg border border-[#e8ebef] bg-white px-4 py-3 text-xs leading-5 text-[#63707e]">{String(resolve(summary, "profitAvailability.explanation") ?? "Profit is not calculated from gross sales.")} Method: {String(resolve(summary, "profitAvailability.method") ?? "Net sales value minus the recorded cost of gold sold or released.")}</p>}
     {module === "reports" && <DateFilter from={reportFrom} to={reportTo} onFromChange={setReportFrom} onToChange={setReportTo} onApply={() => { setLoading(true); void load(); }} busy={loading} />}
     {module === "board-prices" && <Card className="border-[#d6aa42] bg-[#fff0c2]"><CardContent className="flex flex-col justify-between gap-3 py-5 sm:flex-row sm:items-center"><div><p className="text-xs font-medium text-[#795719]">Current published board rate</p><p className="mt-1 text-2xl font-semibold text-[#17212f]">{boardCurrent ?     `${formatPriceAmount(String(boardCurrent.priceAmount), String(boardCurrent.currency))} / ${boardPriceUnitLabel(String(boardCurrent.priceUnit))}` : "No board price yet"}</p></div>{boardCurrent && <div className="text-left sm:text-right"><p className="text-xs text-[#795719]">{String(boardCurrent.source)}</p><p className="mt-1 text-[11px] text-[#8b7657]">Effective {formatDate(boardCurrent.effectiveAt)}</p></div>}</CardContent></Card>}
-    {spec && canWrite && showForm && <Card className="border-[#e3d4b8]"><CardHeader className="flex-row items-center justify-between pb-3"><div><CardTitle>{editing ? "Update customer" : spec.title}</CardTitle><p className="mt-1 text-[11px] text-[#8a939e]">{module === "trades" ? "Amounts are calculated from pure weight and the entered price; inventory changes only when the trade commits." : module === "payments" ? "A payment must be allocated to a trade and cannot exceed its outstanding balance." : "Fields marked required must be completed."}</p></div><button onClick={() => { setShowForm(false); setEditing(null); }} className="rounded-md p-1.5 text-[#8c95a0] hover:bg-[#f1f3f5]" aria-label="Close form"><X size={16} /></button></CardHeader><CardContent><form onSubmit={form.handleSubmit(submit)} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    {spec && canWrite && showForm && <div
+      className={module === "staff" ? "fixed inset-0 z-[80] flex items-center justify-center bg-[#0c1521]/60 p-4 backdrop-blur-[2px]" : "contents"}
+      onMouseDown={(event) => {
+        if (module === "staff" && event.target === event.currentTarget && !form.formState.isSubmitting) setShowForm(false);
+      }}
+    >
+      <section
+        role={module === "staff" ? "dialog" : undefined}
+        aria-modal={module === "staff" ? true : undefined}
+        aria-labelledby={module === "staff" ? "staff-create-title" : undefined}
+        className={module === "staff" ? "max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl" : "contents"}
+      >
+    <Card className="border-[#e3d4b8]"><CardHeader className="flex-row items-center justify-between pb-3"><div><CardTitle id={module === "staff" ? "staff-create-title" : undefined}>{editing ? "Update customer" : spec.title}</CardTitle><p className="mt-1 text-[11px] text-[#8a939e]">{module === "trades" ? "Amounts are calculated from pure weight and the entered price; inventory changes only when the trade commits." : module === "payments" ? "A payment must be allocated to a trade and cannot exceed its outstanding balance." : "Fields marked required must be completed."}</p></div><button type="button" disabled={form.formState.isSubmitting} onClick={() => { setShowForm(false); setEditing(null); }} className="rounded-md p-1.5 text-[#8c95a0] hover:bg-[#f1f3f5] disabled:opacity-50" aria-label="Close form"><X size={16} /></button></CardHeader><CardContent><form onSubmit={form.handleSubmit(submit)} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {spec.fields.map((field) => {
         const options = getFieldOptions(field, module, references);
         const fieldError = form.formState.errors[field.name]?.message;
@@ -468,7 +513,32 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
       })}
       {module === "trades" && <p className="text-[10px] leading-4 text-[#89929e] sm:col-span-2 xl:col-span-3">Price is in Ghana cedis per gram of pure gold. Quantity is gross physical weight in kilograms. Sales are rejected if available FIFO stock is insufficient.</p>}
       <div className="flex flex-wrap items-center gap-2 sm:col-span-2 xl:col-span-3"><Button type="submit" variant="gold" disabled={form.formState.isSubmitting}>{form.formState.isSubmitting ? "Saving…" : editing ? "Save changes" : "Save record"}</Button><Button type="button" variant="outline" onClick={() => { form.reset(defaultValues[module] ?? {}); setEditing(null); }}>Clear</Button></div>
-    </form></CardContent></Card>}
+    </form></CardContent></Card>
+      </section>
+    </div>}
+
+    {module === "staff" && canCreateOwner && showOwnerForm && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0c1521]/60 p-4 backdrop-blur-[2px]" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !ownerFormBusy) setShowOwnerForm(false);
+    }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="owner-create-title" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl">
+    <Card className="border-[#d6aa42]">
+      <CardHeader className="flex-row items-center justify-between pb-3">
+        <div><CardTitle id="owner-create-title">Create owner account</CardTitle><p className="mt-1 text-[11px] text-[#8a939e]">Owners have full access and sign in with their email and password.</p></div>
+        <button type="button" disabled={ownerFormBusy} onClick={() => setShowOwnerForm(false)} className="rounded-md p-1.5 text-[#8c95a0] hover:bg-[#f1f3f5] disabled:opacity-50" aria-label="Close owner form"><X size={16} /></button>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={(event) => { event.preventDefault(); void submitOwner(); }} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <FormField label="Owner name" htmlFor="new-owner-name"><input id="new-owner-name" autoComplete="name" required minLength={2} maxLength={120} value={ownerForm.name} onChange={(event) => setOwnerForm((current) => ({ ...current, name: event.target.value }))} className={fieldControlClass} /></FormField>
+          <FormField label="Email address" htmlFor="new-owner-email"><input id="new-owner-email" type="email" autoComplete="email" required maxLength={254} value={ownerForm.email} onChange={(event) => setOwnerForm((current) => ({ ...current, email: event.target.value }))} className={fieldControlClass} /></FormField>
+          <FormField label="Phone number" htmlFor="new-owner-phone"><input id="new-owner-phone" type="tel" autoComplete="tel" required minLength={6} maxLength={40} value={ownerForm.phone} onChange={(event) => setOwnerForm((current) => ({ ...current, phone: event.target.value }))} className={fieldControlClass} /></FormField>
+          <FormField label="Password" htmlFor="new-owner-password" hint="Use 12–128 characters."><input id="new-owner-password" type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={ownerForm.password} onChange={(event) => setOwnerForm((current) => ({ ...current, password: event.target.value }))} className={fieldControlClass} /></FormField>
+          <FormField label="Confirm password" htmlFor="new-owner-confirm-password"><input id="new-owner-confirm-password" type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={ownerForm.confirmPassword} onChange={(event) => setOwnerForm((current) => ({ ...current, confirmPassword: event.target.value }))} className={fieldControlClass} /></FormField>
+          <div className="flex items-end gap-2"><Button type="submit" variant="gold" disabled={ownerFormBusy}>{ownerFormBusy ? "Creating…" : "Create owner"}</Button><Button type="button" variant="outline" disabled={ownerFormBusy} onClick={() => setOwnerForm({ name: "", email: "", phone: "", password: "", confirmPassword: "" })}>Clear</Button></div>
+        </form>
+      </CardContent>
+    </Card>
+      </section>
+    </div>}
 
     {module === "staff" && <Card className="staff-role-info border-blue-100 bg-blue-50/50"><CardContent className="py-3 text-xs leading-5 text-blue-800"><p>Role templates set starting access. Administrators can assign individual permissions, which are checked by the server on every operation. Deactivation preserves historical records.</p><p className="mt-2 text-[10px]"><strong>Owner:</strong> full control · <strong>Manager:</strong> operations and approvals · <strong>Gold Receiver:</strong> purchases · <strong>Sales Officer:</strong> sales · <strong>Inventory Officer:</strong> stock · <strong>Accountant:</strong> finance and reports · <strong>Read-only Auditor:</strong> review access.</p></CardContent></Card>}
 

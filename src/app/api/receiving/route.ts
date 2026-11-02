@@ -6,6 +6,7 @@ import { prepareReceivingForSave } from "@/lib/receiving";
 import { receivingSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { purchaseConfirmationSms, sendOwnerSms } from "@/lib/sms";
+import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET() {
   try {
@@ -67,8 +68,18 @@ export async function POST(request: Request) {
             amountPaid: trade.paymentAmount.toString(),
             recordedBy: user.name,
           }));
+          await sendOwnerTransactionEmail({
+            type: "PURCHASE",
+            reference: trade.reference,
+            counterpartyLabel: "Supplier",
+            counterpartyName: supplier?.name ?? "Unknown supplier",
+            quantityKg: trade.quantityKg.toString(),
+            totalAmount: trade.totalAmount.toString(),
+            amountPaid: trade.paymentAmount.toString(),
+            recordedBy: user.name,
+          });
         } catch (error) {
-          console.error("Purchase was saved, but its owner SMS notification could not be prepared.", error);
+          console.error("Purchase was saved, but its owner notifications could not be prepared.", error);
         }
       });
     }

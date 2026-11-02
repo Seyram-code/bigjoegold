@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { addAudit, reference } from "@/lib/records";
 import { requireUser } from "@/lib/authz";
@@ -7,6 +8,7 @@ import { paymentSchema } from "@/lib/validation";
 import { recordPaymentMovement } from "@/lib/finance";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { paymentConfirmationSms, sendOwnerSms } from "@/lib/sms";
+import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET() {
   try {
@@ -94,6 +96,18 @@ export async function POST(request: Request) {
         customer: { select: { name: true } },
         trade: { select: { reference: true } },
       },
+    });
+    after(async () => {
+      await sendOwnerTransactionEmail({
+        type: "PAYMENT",
+        reference: paymentDetails.reference,
+        direction: paymentDetails.direction,
+        amount: paymentDetails.amount.toString(),
+        method: paymentDetails.method,
+        customerName: paymentDetails.customer?.name,
+        tradeReference: paymentDetails.trade?.reference,
+        recordedBy: user.name,
+      });
     });
     await sendOwnerSms(paymentConfirmationSms({
       reference: paymentDetails.reference,
