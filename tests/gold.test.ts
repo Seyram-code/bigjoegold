@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
-import { calculateBatchSaleQuote, calculateMeasuredSaleQuote, calculatePurchaseMeasurements, calculateSaleQuote, calculateTradeAmount, calculateWeightedBatchDensity, planFifo } from "../src/lib/gold";
+import { calculateBatchSaleQuote, calculateMeasuredSaleQuote, calculatePurchaseMeasurements, calculateSaleQuote, calculateTradeAmount, calculateWeightedBatchDensity, inferSaleDownWeightFromReceipts, planFifo } from "../src/lib/gold";
 import { DEFAULT_PURCHASE_FORMULA_RULES, PURCHASE_FORMULA_VERSION, purchaseFormulaRules } from "../src/lib/purchase-formula";
 import { HttpError, readJson } from "../src/lib/http";
 import { receivingSchema, saleCorrectionSchema, saleSchema, tradeSchema } from "../src/lib/validation";
@@ -15,7 +15,7 @@ import { inventoryMovementSchema } from "../src/lib/validation";
 import { ledgerBalances, movementBalance } from "../src/lib/inventory";
 import { createBatchCode } from "../src/lib/records";
 import { calculateCashBalances } from "../src/lib/finance";
-import { calculateInventoryAverageKarat, calculateReceivedMeasurementTotals } from "../src/lib/dashboard-metrics";
+import { calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoStatement } from "../src/lib/manual-momo";
 import { customerAdvanceSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
 
@@ -124,6 +124,34 @@ test("measured sales use the receiving assay formula and selling price", () => {
   assert.equal(quote.subtotal.toFixed(2), "675624.97");
   assert.equal(quote.total.toFixed(2), "675599.22");
   assert.throws(() => calculateMeasuredSaleQuote("458.90", "24.2", "11230", "675624.97"), /Discount must be less/);
+});
+
+test("sale down weight sums each fully allocated batch's receiving down weight", () => {
+  const downGrams = inferSaleDownWeightFromReceipts([
+    { lotId: "BASA89YL", grams: "443.74" },
+    { lotId: "0GC3CJZY", grams: "761.85" },
+  ], [
+    { id: "BASA89YL", purchaseMeasurement: { topKg: "0.44374", downKg: "0.417" } },
+    { id: "0GC3CJZY", purchaseMeasurement: { topKg: "0.76185", downKg: "0.723" } },
+  ]);
+  assert.equal(downGrams?.toString(), "1140");
+});
+
+test("sale down weight scales proportionally for partially allocated batches", () => {
+  const downGrams = inferSaleDownWeightFromReceipts([
+    { lotId: "BASA89YL", grams: "221.87" },
+    { lotId: "0GC3CJZY", grams: "380.925" },
+  ], [
+    { id: "BASA89YL", purchaseMeasurement: { topKg: "0.44374", downKg: "0.417" } },
+    { id: "0GC3CJZY", purchaseMeasurement: { topKg: "0.76185", downKg: "0.723" } },
+  ]);
+  assert.equal(downGrams?.toString(), "570");
+});
+
+test("sale down weight stays unset when a selected batch has no receiving measurement", () => {
+  assert.equal(inferSaleDownWeightFromReceipts([
+    { lotId: "BASA89YL", grams: "443.74" },
+  ], [{ id: "BASA89YL", purchaseMeasurement: null }]), null);
 });
 
 test("previously confirmed formula versions require confirmation of the new calculation", () => {
@@ -639,12 +667,12 @@ test("dashboard received measurements and current inventory karat are weighted b
     {
       quantityKg: "1",
       purityBps: 9000,
-      measurement: { pounds: "10", density: "10", karat: "18" },
+      measurement: { pounds: "10", density: "10", karat: "18", downKg: "0.8" },
     },
     {
       quantityKg: "3",
       purityBps: 7500,
-      measurement: { pounds: "30", density: "12", karat: "20" },
+      measurement: { pounds: "30", density: "12", karat: "20", downKg: "2.4" },
     },
     {
       quantityKg: "1",
@@ -653,8 +681,15 @@ test("dashboard received measurements and current inventory karat are weighted b
     },
   ]);
   assert.equal(received.pounds, 40);
+  assert.equal(received.downGrams, 3200);
   assert.equal(received.density, 11.5);
   assert.equal(received.karat, 19.44);
+
+  assert.equal(calculateSoldDownWeight([
+    { quantityKg: "1", measurement: { topGrams: "1000", downGrams: "800" }, returnedGrams: "250" },
+    { quantityKg: "0.5", measurement: { topGrams: "500", downGrams: "450" }, returnedGrams: "0" },
+    { quantityKg: "0.25", measurement: null, returnedGrams: "0" },
+  ]), 1050);
 
   assert.equal(calculateInventoryAverageKarat([
     { grams: "1000", purityBps: 9000 },

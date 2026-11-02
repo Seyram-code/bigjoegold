@@ -11,7 +11,15 @@ export async function GET() {
       prisma.inventoryLot.findMany({
         orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
         include: {
-          trade: { select: { reference: true, purityBps: true, createdAt: true, customer: { select: { name: true } } } },
+          trade: {
+            select: {
+              reference: true,
+              purityBps: true,
+              createdAt: true,
+              customer: { select: { name: true } },
+              purchaseMeasurement: { select: { topKg: true, downKg: true } },
+            },
+          },
           storageLocation: { select: { id: true, name: true } },
         },
       }),

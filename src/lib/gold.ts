@@ -74,6 +74,39 @@ export function calculateMeasuredSaleQuote(
   };
 }
 
+export function inferSaleDownWeightFromReceipts(
+  allocations: { lotId: string; grams: Prisma.Decimal | string | number }[],
+  lots: {
+    id: string;
+    purchaseMeasurement?: {
+      topKg: Prisma.Decimal | string | number;
+      downKg: Prisma.Decimal | string | number;
+    } | null;
+  }[],
+) {
+  if (allocations.length === 0) return null;
+  const lotById = new Map(lots.map((lot) => [lot.id, lot]));
+  let totalDownGrams = new Prisma.Decimal(0);
+
+  for (const allocation of allocations) {
+    const measurement = lotById.get(allocation.lotId)?.purchaseMeasurement;
+    if (!measurement) return null;
+    const topGrams = new Prisma.Decimal(measurement.topKg).mul(1000);
+    const downGrams = new Prisma.Decimal(measurement.downKg).mul(1000);
+    const allocatedGrams = new Prisma.Decimal(allocation.grams);
+    if (!topGrams.isFinite() || !downGrams.isFinite() || !allocatedGrams.isFinite()
+      || !topGrams.greaterThan(0) || !downGrams.greaterThan(0) || !allocatedGrams.greaterThan(0)) {
+      return null;
+    }
+    const allocatedDownGrams = allocatedGrams.equals(topGrams)
+      ? downGrams
+      : downGrams.mul(allocatedGrams).div(topGrams);
+    totalDownGrams = totalDownGrams.plus(allocatedDownGrams);
+  }
+
+  return totalDownGrams.toDecimalPlaces(8, Prisma.Decimal.ROUND_DOWN);
+}
+
 function positiveDecimal(value: number | string, label: string) {
   if (typeof value === "number" && !Number.isFinite(value)) {
     throw new RangeError(`${label} must be a finite positive number`);

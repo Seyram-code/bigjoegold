@@ -18,7 +18,7 @@ import { PaymentProcessingOverlay } from "@/components/ui/payment-processing-ove
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { SearchInput } from "@/components/ui/search-input";
-import { calculateMeasuredSaleQuote } from "@/lib/gold";
+import { calculateMeasuredSaleQuote, inferSaleDownWeightFromReceipts } from "@/lib/gold";
 import { formatCurrency, formatPriceAmount, formatTwoDecimalTruncated, formatWeight } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { DEFAULT_PURCHASE_FORMULA_RULES, type PurchaseFormulaRules } from "@/lib/purchase-formula";
@@ -29,7 +29,7 @@ import { saleCorrectionSchema, saleSchema } from "@/lib/validation";
 import { ZodError } from "zod";
 
 type Buyer = { id: string; name: string; code: string; type: string; phone?: string | null; address?: string | null };
-type Lot = { id: string; batchNumber?: string; source?: string; receivedAt: string; status?: string; remainingGrams: string | number; purityBps: number; costPerGram: string | number; density?: string | number | null; trade: { reference: string; customer?: { name: string } | null } | null };
+type Lot = { id: string; batchNumber?: string; source?: string; receivedAt: string; status?: string; remainingGrams: string | number; purityBps: number; costPerGram: string | number; density?: string | number | null; trade: { reference: string; customer?: { name: string } | null; purchaseMeasurement?: { topKg: string | number; downKg: string | number } | null } | null };
 type Allocation = { lotId: string; grams: string };
 type Correction = {
   id: string; reference: string; type: "RETURN" | "REVERSAL"; quantityGrams: string | number;
@@ -246,22 +246,28 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
       setError("A sale can include no more than 50 stock batches.");
       return;
     }
-    setAllocations((current) => {
-      const remaining = current.filter((allocation) => allocation.lotId !== selectedLot.id);
-      return [...remaining, { lotId: selectedLot.id, grams: selectedLotGrams }];
-    });
-    setMeasurementConfirmed(false);
+    const remaining = allocations.filter((allocation) => allocation.lotId !== selectedLot.id);
+    updateAllocations([...remaining, { lotId: selectedLot.id, grams: selectedLotGrams }]);
     setSelectedLotGrams("");
+  }
+
+  function updateAllocations(next: Allocation[]) {
+    setAllocations(next);
+    const totalGrams = next.reduce((sum, allocation) => sum.plus(allocation.grams || 0), new Prisma.Decimal(0));
+    setMeasurementTopGrams(totalGrams.isZero() ? "" : totalGrams.toString());
+    const downGrams = inferSaleDownWeightFromReceipts(
+      next,
+      lots.map((lot) => ({ id: lot.id, purchaseMeasurement: lot.trade?.purchaseMeasurement })),
+    );
+    setMeasurementDownGrams(downGrams?.toString() ?? "");
+    setMeasurementConfirmed(false);
   }
 
   function clearSale() {
     setBuyerId("");
-    setAllocations([]);
+    updateAllocations([]);
     setSelectedLotId("");
     setSelectedLotGrams("");
-    setMeasurementTopGrams("");
-    setMeasurementDownGrams("");
-    setMeasurementConfirmed(false);
     setDiscountAmount("0");
     setInitialPayment("0");
     setPaymentAmountTouched(false);
@@ -465,20 +471,13 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
                   const label = lot?.batchNumber || lot?.trade?.reference || "Stock batch";
                   return <div key={allocation.lotId} className="grid grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-2 text-xs">
                     <span className="truncate font-medium text-[#344151]">{label}<span className="ml-2 font-normal text-[#89929d]">{formatWeight(lot?.remainingGrams ?? 0, "g", 2)} available</span></span>
-                    <input aria-label={`Allocated grams from ${label}`} type="number" min="0" max={Number(lot?.remainingGrams ?? 0)} step="0.00001" value={allocation.grams} onChange={(event) => { setMeasurementConfirmed(false); setAllocations((current) => current.map((entry) => entry.lotId === allocation.lotId ? { ...entry, grams: event.target.value } : entry)); }} className="h-9 rounded-md border border-[#dfe4e9] px-2 text-xs outline-none focus:border-[#bc8c36]" />
-                    <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${label}`} onClick={() => { setMeasurementConfirmed(false); setAllocations((current) => current.filter((entry) => entry.lotId !== allocation.lotId)); }}><X size={14} /></Button>
+                    <input aria-label={`Allocated grams from ${label}`} type="number" min="0" max={Number(lot?.remainingGrams ?? 0)} step="0.00001" value={allocation.grams} onChange={(event) => updateAllocations(allocations.map((entry) => entry.lotId === allocation.lotId ? { ...entry, grams: event.target.value } : entry))} className="h-9 rounded-md border border-[#dfe4e9] px-2 text-xs outline-none focus:border-[#bc8c36]" />
+                    <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${label}`} onClick={() => updateAllocations(allocations.filter((entry) => entry.lotId !== allocation.lotId))}><X size={14} /></Button>
                   </div>;
                 })}
               </div> : <p className="rounded-lg bg-[#fafbfc] p-3 text-xs text-[#89929d]">{lots.some((lot) => lot.status === "ACTIVE" && Number(lot.remainingGrams) > 0) ? "Choose a batch and enter its weight to add stock to this sale." : "No available gold stock."}</p>}
               <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#e8ebef] p-3">
-                <Button type="button" variant={measurementConfirmed ? "outline" : "gold"} disabled={!boardPrice} onClick={() => {
-                  const allocatedTopGrams = allocatedGramsDecimal.greaterThan(0) ? allocatedGramsDecimal.toString() : "";
-                  if (measurementTopGrams !== allocatedTopGrams) {
-                    setMeasurementTopGrams(allocatedTopGrams);
-                    setMeasurementConfirmed(false);
-                  }
-                  setMeasurementModalOpen(true);
-                }}>{measurementConfirmed ? <><Check size={14} /> Edit gold measurements</> : "Measure gold"}</Button>
+                <Button type="button" variant={measurementConfirmed ? "outline" : "gold"} disabled={!boardPrice} onClick={() => setMeasurementModalOpen(true)}>{measurementConfirmed ? <><Check size={14} /> Edit gold measurements</> : "Measure gold"}</Button>
                 <p className="text-xs text-[#89929d]">{measurementConfirmed && measurement.result
                   ? `Applied: ${formatTwoDecimalTruncated(measurement.result.karat.toString())}K · ${formatCurrency(measurement.result.total.toNumber())}`
                   : "Measure the gold to calculate its karat and sale price."}</p>
@@ -590,7 +589,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
           <FormField label="Top weight (g)" htmlFor="sale-measurement-top" hint="Must match the total grams allocated from stock batches.">
             <input id="sale-measurement-top" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementTopGrams} onChange={(event) => { setMeasurementTopGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
           </FormField>
-          <FormField label="Down weight (g)" htmlFor="sale-measurement-down">
+          <FormField label="Down weight (g)" htmlFor="sale-measurement-down" hint="Auto-filled from the receiving measurements of selected batches; partial batches are scaled. You can adjust it if you remeasure.">
             <input id="sale-measurement-down" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementDownGrams} onChange={(event) => { setMeasurementDownGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
           </FormField>
           <FormField label="Pounds (calculated)" htmlFor="sale-measurement-pounds"><input id="sale-measurement-pounds" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.pounds.toString()) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>

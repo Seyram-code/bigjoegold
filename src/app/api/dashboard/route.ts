@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/authz";
 import { apiError, HttpError } from "@/lib/http";
 import { ledgerBalances } from "@/lib/inventory";
-import { calculateInventoryAverageKarat, calculateReceivedMeasurementTotals } from "@/lib/dashboard-metrics";
+import { calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "@/lib/dashboard-metrics";
 
 const zero = () => new Prisma.Decimal(0);
 
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
             totalAmount: true, costBasis: true, quantityKg: true, transactionDate: true,
             purityBps: true,
             saleMeasurement: {
-              select: { topGrams: true, pounds: true, density: true, karat: true },
+              select: { topGrams: true, downGrams: true, pounds: true, density: true, karat: true },
             },
             corrections: {
               select: {
@@ -133,7 +133,7 @@ export async function GET(request: Request) {
           select: {
             quantityKg: true,
             purityBps: true,
-            purchaseMeasurement: { select: { pounds: true, density: true, karat: true } },
+            purchaseMeasurement: { select: { pounds: true, density: true, karat: true, downKg: true } },
           },
         }),
       ]);
@@ -165,6 +165,11 @@ export async function GET(request: Request) {
       quantityKg: purchase.quantityKg,
       purityBps: purchase.purityBps,
       measurement: purchase.purchaseMeasurement,
+    })));
+    const salesDownGramsInPeriod = calculateSoldDownWeight(sales.map((sale) => ({
+      quantityKg: sale.quantityKg,
+      measurement: sale.saleMeasurement,
+      returnedGrams: sale.corrections.reduce((sum, correction) => sum.plus(correction.quantityGrams), zero()),
     })));
     const inventoryByKarat = new Map<number, Prisma.Decimal>();
     for (const lot of availableLots) {
@@ -258,6 +263,7 @@ export async function GET(request: Request) {
         salesInPeriod: saleRevenue.toNumber(),
         salesKgInPeriod: saleQuantityKg.toNumber(),
         salesGramsInPeriod: saleMeasurementTotals.grams.toNumber(),
+        salesDownGramsInPeriod,
         salesGramsToday: salesGramsToday.toNumber(),
         salesRevenueToday: salesRevenueToday.toNumber(),
         salesPoundsInPeriod: saleMeasurementTotals.pounds.toNumber(),
@@ -271,6 +277,7 @@ export async function GET(request: Request) {
         purchasesInPeriod: Number(purchases._sum.totalAmount ?? 0),
         purchasesKgInPeriod: Number(purchases._sum.quantityKg ?? 0),
         purchasesPoundsInPeriod: receivedMeasurementTotals.pounds,
+        purchasesDownGramsInPeriod: receivedMeasurementTotals.downGrams,
         purchasesDensityInPeriod: receivedMeasurementTotals.density,
         purchasesKaratInPeriod: receivedMeasurementTotals.karat,
         inventoryAverageKarat,
