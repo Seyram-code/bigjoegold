@@ -35,8 +35,12 @@ export function LoginForm() {
 
   async function handleFailedLogin(response: Response, fallback: string) {
     const body: unknown = await response.json().catch(() => null);
-    const message = typeof body === "object" && body !== null && "message" in body && typeof body.message === "string"
-      ? body.message
+    const message = typeof body === "object" && body !== null
+      ? "message" in body && typeof body.message === "string" && body.message.trim()
+        ? body.message
+        : "error" in body && typeof body.error === "string" && body.error.trim()
+          ? body.error
+          : fallback
       : fallback;
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get("Retry-After")) || 60;
