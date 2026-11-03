@@ -4,8 +4,18 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CalendarDays, ChevronDown, CircleDot, Download, Eye, FileText, Filter, LoaderCircle, Mail, MapPin, MoreHorizontal, Pencil, Plus, RotateCcw, UserRound, Users, X, type LucideIcon } from "lucide-react";
+import { readSheet } from "read-excel-file/browser";
+import { CalendarDays, ChevronDown, CircleDot, Download, Eye, FileSpreadsheet, FileText, Filter, LoaderCircle, Mail, MapPin, MoreHorizontal, Pencil, Plus, RotateCcw, Upload, UserRound, Users, X, type LucideIcon } from "lucide-react";
 import { customerSchema, type CustomerInput } from "@/lib/validation";
+import {
+  CUSTOMER_IMPORT_COLUMNS,
+  customerImportFieldForHeader,
+  customerImportRowSchema,
+  MAX_CUSTOMER_IMPORT_ROWS,
+  type CustomerImportField,
+  normalizeCustomerImportValue,
+} from "@/lib/customer-import";
+import { customerCsvRow } from "@/lib/customer-csv";
 import { useToast } from "@/components/ui/toast-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -76,6 +86,12 @@ type Customer = {
 };
 
 type Duplicate = { id: string; code: string; name: string; type: string; reasons: string[]; phone?: string | null };
+type CustomerImportRow = { rowNumber: number; data: Record<string, unknown> };
+type CustomerImportResult = {
+  imported: number;
+  skipped: number;
+  rows: { rowNumber: number; status: "imported" | "duplicate" | "invalid"; reason?: string }[];
+};
 
 const emptyCustomer: CustomerInput = {
   name: "",
@@ -137,6 +153,15 @@ export function CustomerManagement({
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importFileName, setImportFileName] = useState("");
+  const [importRows, setImportRows] = useState<CustomerImportRow[]>([]);
+  const [importValidCount, setImportValidCount] = useState(0);
+  const [importInvalidCount, setImportInvalidCount] = useState(0);
+  const [importResult, setImportResult] = useState<CustomerImportResult | null>(null);
+  const [importError, setImportError] = useState("");
+  const [importReading, setImportReading] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const form = useForm<CustomerInput>({ resolver: zodResolver(customerSchema), defaultValues: { ...emptyCustomer, kind } });
 
   const load = useCallback(async (background = false) => {
@@ -368,7 +393,121 @@ export function CustomerManagement({
     }
   }
 
+  function closeImportDialog() {
+    if (importBusy) return;
+    setShowImportDialog(false);
+    setImportFileName("");
+    setImportRows([]);
+    setImportValidCount(0);
+    setImportInvalidCount(0);
+    setImportResult(null);
+    setImportError("");
+  }
+
+  function downloadImportTemplate() {
+    const content = `\uFEFF${customerCsvRow(CUSTOMER_IMPORT_COLUMNS.map(({ header }) => header))}\r\n`;
+    const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `big-joe-gold-${kind === "SUPPLIER" ? "supplier" : "customer"}-import-template.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function readImportFile(file: File) {
+    setImportError("");
+    setImportResult(null);
+    setImportRows([]);
+    setImportValidCount(0);
+    setImportInvalidCount(0);
+    setImportFileName(file.name);
+    if (!file.name.toLocaleLowerCase().endsWith(".xlsx")) {
+      setImportError("Choose an Excel workbook in .xlsx format.");
+      return;
+    }
+    if (file.size === 0 || file.size > 5 * 1024 * 1024) {
+      setImportError("The Excel file must be smaller than 5 MB and cannot be empty.");
+      return;
+    }
+
+    setImportReading(true);
+    try {
+      const worksheetRows = await readSheet(file);
+      if (!worksheetRows.length) throw new Error("The first worksheet is empty.");
+      const columns: { index: number; field: CustomerImportField }[] = [];
+      const foundFields = new Set<CustomerImportField>();
+      worksheetRows[0].forEach((header, index) => {
+        const field = customerImportFieldForHeader(header);
+        if (!field) return;
+        if (foundFields.has(field)) throw new Error(`The worksheet has more than one column for ${field}.`);
+        foundFields.add(field);
+        columns.push({ index, field });
+      });
+      if (!foundFields.has("name") || !foundFields.has("phone")) {
+        throw new Error("The first worksheet must include Customer Full Name and Phone Number columns.");
+      }
+
+      const parsedRows: CustomerImportRow[] = [];
+      for (let index = 1; index < worksheetRows.length; index += 1) {
+        const sourceRow = worksheetRows[index];
+        if (!sourceRow.some((value) => value !== null && value !== undefined && String(value).trim() !== "")) continue;
+        const data: Record<string, unknown> = {};
+        for (const { index: columnIndex, field } of columns) {
+          const value = sourceRow[columnIndex];
+          if (value === null || value === undefined || value === "") continue;
+          data[field] = importCellValue(value, field);
+        }
+        parsedRows.push({ rowNumber: index + 1, data });
+        if (parsedRows.length > MAX_CUSTOMER_IMPORT_ROWS) {
+          throw new Error(`The workbook can contain at most ${MAX_CUSTOMER_IMPORT_ROWS} customer rows.`);
+        }
+      }
+      if (!parsedRows.length) throw new Error("The worksheet does not contain any customer rows.");
+
+      const validCount = parsedRows.filter(({ data }) => customerImportRowSchema.safeParse(data).success).length;
+      setImportRows(parsedRows);
+      setImportValidCount(validCount);
+      setImportInvalidCount(parsedRows.length - validCount);
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : "Unable to read the Excel workbook.");
+    } finally {
+      setImportReading(false);
+    }
+  }
+
+  async function importCustomers() {
+    if (!importRows.length || importValidCount === 0 || importBusy) return;
+    setImportBusy(true);
+    setImportError("");
+    try {
+      const response = await fetch("/api/customers/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, rows: importRows }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(readError(body, "Unable to import customers"));
+      if (!isCustomerImportResult(body)) throw new Error("The customer import service returned an invalid response.");
+      setImportResult(body);
+      if (body.imported > 0) {
+        showToast(`Imported ${body.imported} customer${body.imported === 1 ? "" : "s"}; skipped ${body.skipped} row${body.skipped === 1 ? "" : "s"}.`);
+      }
+      await load();
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : "Unable to import customers.");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   const groupLabel = kind === "SUPPLIER" ? "Receiving-stock suppliers" : "Sales customers";
+  const previewInvalidRows = importRows.flatMap(({ rowNumber, data }) => {
+    const parsed = customerImportRowSchema.safeParse(data);
+    return parsed.success ? [] : [{
+      rowNumber,
+      reason: [...new Set(parsed.error.issues.map((issue) => issue.message))].join("; "),
+    }];
+  });
   const pageSize = 10;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -378,6 +517,7 @@ export function CustomerManagement({
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div><h1 className="text-[27px] font-bold leading-tight tracking-[-.03em] text-[#111820]">{groupLabel}</h1><p className="mt-0.5 text-[13px] text-[#637083]">{kind === "SUPPLIER" ? "Manage the people and businesses who sell gold to you." : "Manage the people and businesses who buy gold from you."}</p></div>
       <div className="flex flex-wrap gap-2">
+        {canWrite && canReadPersonal && <Button variant="outline" size="sm" className="h-9 px-3" onClick={() => { setShowImportDialog(true); setImportError(""); }}><Upload size={15} /> Import Excel</Button>}
         {canWrite && <Button variant="gold" size="sm" className="h-9 px-4" onClick={startCreate}><Plus size={15} /> Add Customer</Button>}
       </div>
     </div>
@@ -390,6 +530,78 @@ export function CustomerManagement({
     </section>
 
     {error && <Message tone="error" onDismiss={() => setError("")}>{error}</Message>}
+
+    {showImportDialog && canWrite && canReadPersonal && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#0c1521]/50 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) closeImportDialog(); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="customer-import-title" className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#e8ebef] bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,.24)] dark:border-slate-700 dark:bg-slate-900 sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="customer-import-title" className="text-xl font-bold text-[#17212f] dark:text-slate-100">Import Customers from Excel</h2>
+            <p className="mt-1 text-sm text-[#637083] dark:text-slate-300">Import {kind === "SUPPLIER" ? "receiving-stock suppliers" : "sales customers"}. Customer Full Name and Phone Number are required.</p>
+          </div>
+          <button type="button" onClick={closeImportDialog} aria-label="Close customer import" disabled={importBusy} className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6] disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"><X size={16} /></button>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e8edf3] bg-[#fbfcfe] p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="flex items-start gap-3">
+              <FileSpreadsheet size={19} className="mt-0.5 shrink-0 text-[#a17a35]" />
+              <div>
+                <p className="text-sm font-semibold text-[#263241] dark:text-slate-100">Use the import template</p>
+                <p className="mt-1 text-xs text-[#637083] dark:text-slate-300">The CSV template opens in Excel. Save your completed workbook as .xlsx before importing; only its first worksheet is read.</p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={downloadImportTemplate}><Download size={14} /> Download template</Button>
+          </div>
+
+          <label className="block rounded-xl border border-dashed border-[#cbd3dd] p-4 dark:border-slate-600">
+            <span className="block text-sm font-semibold text-[#263241] dark:text-slate-100">Choose an .xlsx workbook</span>
+            <span className="mt-1 block text-xs text-[#637083] dark:text-slate-300">Maximum 5 MB and {MAX_CUSTOMER_IMPORT_ROWS} customer rows. Format phone numbers as text to preserve leading zeroes. Type accepts Individual or Business; dates should use YYYY-MM-DD.</span>
+            <input
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="mt-3 block w-full text-sm text-[#536174] file:mr-3 file:rounded-lg file:border-0 file:bg-[#f5e3b0] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#795719] dark:text-slate-300"
+              disabled={importReading || importBusy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void readImportFile(file);
+                event.target.value = "";
+              }}
+            />
+          </label>
+
+          {importFileName && <p className="text-xs text-[#536174] dark:text-slate-300">Selected: {importFileName}</p>}
+          {importReading && <p className="flex items-center gap-2 text-sm text-[#637083] dark:text-slate-300"><LoaderCircle size={15} className="animate-spin" /> Reading workbook…</p>}
+          {importRows.length > 0 && !importResult && <div className="rounded-xl border border-[#e8edf3] p-3 text-sm text-[#344151] dark:border-slate-700 dark:text-slate-200">
+            Found {importRows.length} rows: {importValidCount} appear valid and {importInvalidCount} need correction. Existing and repeated phone numbers will be skipped.
+            {previewInvalidRows.length > 0 && <ul className="mt-2 max-h-28 space-y-1 overflow-auto text-xs text-red-700 dark:text-red-300">
+              {previewInvalidRows.slice(0, 20).map((row) => <li key={row.rowNumber}>Excel row {row.rowNumber}: {row.reason}</li>)}
+              {previewInvalidRows.length > 20 && <li>And {previewInvalidRows.length - 20} more rows need correction.</li>}
+            </ul>}
+          </div>}
+          {importError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{importError}</p>}
+          {importResult && <div className="space-y-2">
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+              Imported {importResult.imported}; skipped {importResult.skipped}.
+            </p>
+            {importResult.skipped > 0 && <div className="max-h-48 overflow-auto rounded-lg border border-[#e8edf3] dark:border-slate-700">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-[#f7f8fa] dark:bg-slate-800"><tr><th className="px-3 py-2">Excel row</th><th className="px-3 py-2">Result</th><th className="px-3 py-2">Details</th></tr></thead>
+                <tbody>{importResult.rows.filter((row) => row.status !== "imported").map((row) => <tr key={row.rowNumber} className="border-t border-[#edf0f3] dark:border-slate-700">
+                  <td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 capitalize">{row.status}</td><td className="px-3 py-2">{row.reason}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>}
+          </div>}
+
+          <div className="flex justify-end gap-2 border-t border-[#e8edf3] pt-4 dark:border-slate-700">
+            <Button variant="outline" onClick={closeImportDialog} disabled={importBusy}>Close</Button>
+            <Button variant="gold" onClick={() => void importCustomers()} disabled={importBusy || importReading || importValidCount === 0 || Boolean(importResult)}>
+              {importBusy ? <><LoaderCircle size={15} className="animate-spin" /> Importing…</> : <><Upload size={15} /> Import {importValidCount} Customers</>}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>}
 
     {showForm && canWrite && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#0c1521]/50 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="customer-form-title" className="max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-2xl border border-[#e8ebef] bg-[#fbfcfe] p-5 shadow-[0_24px_80px_rgba(15,23,42,.24)] sm:p-6">
@@ -588,4 +800,22 @@ function normalizePhone(value?: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function importCellValue(value: unknown, field: CustomerImportField) {
+  const text = value instanceof Date
+    ? field === "dateOfBirth" ? value.toISOString().slice(0, 10) : value.toISOString()
+    : typeof value === "string" ? value.trim() : String(value);
+  return normalizeCustomerImportValue(field, text);
+}
+
+function isCustomerImportResult(value: unknown): value is CustomerImportResult {
+  return isRecord(value)
+    && typeof value.imported === "number"
+    && typeof value.skipped === "number"
+    && Array.isArray(value.rows)
+    && value.rows.every((row) => isRecord(row)
+      && typeof row.rowNumber === "number"
+      && ["imported", "duplicate", "invalid"].includes(String(row.status))
+      && (row.reason === undefined || typeof row.reason === "string"));
 }

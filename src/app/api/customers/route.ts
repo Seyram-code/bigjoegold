@@ -4,7 +4,7 @@ import { addAudit } from "@/lib/records";
 import { can, requireUser } from "@/lib/authz";
 import { apiError, HttpError, readJson } from "@/lib/http";
 import { customerSchema } from "@/lib/validation";
-import { generateCustomerCode } from "@/lib/customer-code";
+import { generateUniqueCustomerCode } from "@/lib/customer-code";
 
 export async function GET(request: Request) {
   try {
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
     const customer = await prisma.$transaction(async (tx) => {
       const created = await tx.customer.create({
         data: {
-          code: generateCustomerCode(input.name),
+          code: await generateUniqueCustomerCode(tx, input.name),
           name: input.name,
           type: input.type,
           kind: input.kind,

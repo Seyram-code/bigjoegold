@@ -32,7 +32,7 @@ export function apiError(error: unknown) {
   return Response.json({ error: "An unexpected error occurred. Check the server logs." }, { status: 500 });
 }
 
-export async function readJson(request: Request): Promise<unknown> {
+export async function readJson(request: Request, maxBytes = 64 * 1024): Promise<unknown> {
   const origin = request.headers.get("origin");
   const requestUrl = new URL(request.url);
   const expectedOrigin = new URL(process.env.BETTER_AUTH_URL ?? request.url).origin;
@@ -51,7 +51,7 @@ export async function readJson(request: Request): Promise<unknown> {
     throw new HttpError("Content-Type must be application/json", 415);
   }
   const contentLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > 64 * 1024) {
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
     throw new HttpError("Request body is too large", 413);
   }
 
@@ -63,7 +63,7 @@ export async function readJson(request: Request): Promise<unknown> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > 64 * 1024) {
+    if (total > maxBytes) {
       await reader.cancel();
       throw new HttpError("Request body is too large", 413);
     }
