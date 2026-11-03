@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { readSheet } from "read-excel-file/browser";
@@ -152,6 +152,7 @@ export function CustomerManagement({
   const [pendingArchive, setPendingArchive] = useState<Customer | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Customer | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
+  const actionsMenuRef = useRef<HTMLTableCellElement>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -192,6 +193,17 @@ export function CustomerManagement({
   useEffect(() => {
     form.reset({ ...emptyCustomer, kind });
   }, [form, kind]);
+
+  useEffect(() => {
+    if (!openActionsId) return;
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (event.target instanceof Node && !actionsMenuRef.current?.contains(event.target)) {
+        setOpenActionsId(null);
+      }
+    }
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [openActionsId]);
 
   function updateSearch(value: string) {
     setPage(1);
@@ -728,7 +740,7 @@ export function CustomerManagement({
                 {canReadTrades && <><td className="whitespace-nowrap px-2.5 py-2 text-[9px] tabular-nums text-[#344151]">{formatWeight(customer.transactionTotals?.quantityKg ?? 0)}</td><td className="whitespace-nowrap px-2.5 py-2 text-[9px] tabular-nums text-[#344151]">{formatCurrency(customer.transactionTotals?.totalAmount ?? 0)}</td></>}
                 <td className="px-2.5 py-2"><span className={cn("rounded-md px-2 py-1 text-[9px] font-semibold", customer.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600")}>{customer.isActive ? "Active" : "Archived"}</span></td>
                 <td className="whitespace-nowrap px-2.5 py-2 text-[9px] text-[#536174]">{new Date(customer.createdAt).toLocaleDateString("en-GH", { day: "2-digit", month: "short", year: "numeric" })}</td>
-                <td className="relative px-2.5 py-2">
+                <td ref={openActionsId === customer.id ? actionsMenuRef : null} className="relative px-2.5 py-2">
                   <div className="flex items-center gap-1">
                     {canWrite && <Button variant="outline" size="icon" className="size-7" aria-label={`Edit ${customer.name}`} title="Edit customer" onClick={() => { setOpenActionsId(null); startEdit(customer); }}><Pencil size={13} /></Button>}
                     <Button variant="outline" size="icon" className="size-7" aria-label={`Actions for ${customer.name}`} aria-expanded={openActionsId === customer.id} onClick={() => setOpenActionsId((current) => current === customer.id ? null : customer.id)}><MoreHorizontal size={14} /></Button>
