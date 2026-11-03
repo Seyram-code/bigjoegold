@@ -87,3 +87,37 @@ export async function PATCH(request: Request, { params }: Context) {
     return apiError(error);
   }
 }
+
+export async function DELETE(_request: Request, { params }: Context) {
+  try {
+    const user = await requireUser("customers:write");
+    const { id } = await params;
+    await prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.findUnique({
+        where: { id },
+        select: {
+          code: true,
+          name: true,
+          kind: true,
+          _count: { select: { trades: true, payments: true, advances: true, buyerFinanceAccounts: true } },
+        },
+      });
+      if (!customer) throw new HttpError("Customer not found", 404);
+      const hasHistory = Object.values(customer._count).some((count) => count > 0);
+      if (hasHistory) {
+        throw new HttpError("This customer has transaction or financing history and cannot be deleted. Archive the customer to preserve their records.", 409);
+      }
+      await addAudit(tx, {
+        userId: user.id,
+        action: "customer.deleted",
+        entity: "Customer",
+        entityId: id,
+        details: { code: customer.code, name: customer.name, kind: customer.kind },
+      });
+      await tx.customer.delete({ where: { id } });
+    });
+    return Response.json({ deleted: true });
+  } catch (error) {
+    return apiError(error);
+  }
+}

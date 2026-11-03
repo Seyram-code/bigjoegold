@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { readSheet } from "read-excel-file/browser";
-import { CalendarDays, ChevronDown, CircleDot, Download, Eye, FileSpreadsheet, FileText, Filter, LoaderCircle, Mail, MapPin, MoreHorizontal, Pencil, Plus, RotateCcw, Upload, UserRound, Users, X, type LucideIcon } from "lucide-react";
+import { CalendarDays, ChevronDown, CircleDot, Download, Eye, FileSpreadsheet, FileText, Filter, LoaderCircle, Mail, MapPin, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, Upload, UserRound, Users, X, type LucideIcon } from "lucide-react";
 import { customerSchema, type CustomerInput } from "@/lib/validation";
 import {
   CUSTOMER_IMPORT_COLUMNS,
@@ -150,8 +150,10 @@ export function CustomerManagement({
   const [duplicates, setDuplicates] = useState<Duplicate[]>([]);
   const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<Customer | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Customer | null>(null);
   const [openActionsId, setOpenActionsId] = useState<string | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importFileName, setImportFileName] = useState("");
@@ -364,6 +366,24 @@ export function CustomerManagement({
       setError(cause instanceof Error ? cause.message : "Unable to update customer status");
     } finally {
       setArchiveBusy(false);
+    }
+  }
+
+  async function deleteCustomer(customer: Customer) {
+    setDeleteBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/customers/${customer.id}`, { method: "DELETE" });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(readError(body, "Unable to delete customer"));
+      setPendingDelete(null);
+      showToast("Customer deleted.");
+      if (customers.length === 1 && page > 1) setPage((current) => current - 1);
+      else await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to delete customer");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -717,6 +737,7 @@ export function CustomerManagement({
                     <Link href={`/customers/${customer.id}`} onClick={() => setOpenActionsId(null)} className="flex items-center gap-2 rounded px-2 py-1.5 text-[10px] text-[#344151] hover:bg-[#f7f8fa]"><Eye size={12} /> View details</Link>
                     {canWrite && <button onClick={() => { setOpenActionsId(null); startEdit(customer); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[10px] text-[#344151] hover:bg-[#f7f8fa]"><Pencil size={12} /> Edit customer</button>}
                     {canWrite && <button onClick={() => { setOpenActionsId(null); setPendingArchive(customer); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[10px] text-[#344151] hover:bg-[#f7f8fa]">{customer.isActive ? <X size={12} /> : <RotateCcw size={12} />}{customer.isActive ? "Archive" : "Restore"}</button>}
+                    {canWrite && <button onClick={() => { setOpenActionsId(null); setPendingDelete(customer); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[10px] text-rose-700 hover:bg-rose-50"><Trash2 size={12} /> Delete customer</button>}
                   </div>}
                 </td>
               </tr>) : <tr><td colSpan={canReadPersonal ? (canReadTrades ? 10 : 8) : (canReadTrades ? 8 : 6)} className="px-3 py-14 text-center"><UserRound className="mx-auto text-[#a4772c]" size={20} /><p className="mt-3 text-xs font-medium text-[#66717d]">{query ? "No customers match your search." : status === "ARCHIVED" ? "No archived customers." : "No customers have been added yet."}</p>{!query && status !== "ARCHIVED" && canWrite && <Button variant="gold" size="sm" className="mt-3" onClick={startCreate}><Plus size={14} /> Add your first customer</Button>}</td></tr>}
@@ -748,6 +769,16 @@ export function CustomerManagement({
       busy={archiveBusy}
       onCancel={() => setPendingArchive(null)}
       onConfirm={() => { if (pendingArchive) void setArchived(pendingArchive, !pendingArchive.isActive); }}
+    />
+    <ConfirmDialog
+      open={Boolean(pendingDelete)}
+      title="Permanently delete this customer?"
+      description={`${pendingDelete?.name} will be permanently removed if they have no linked transactions, payments, advances, or financing accounts. Customers with business history cannot be deleted; archive them instead.`}
+      confirmLabel="Delete customer"
+      destructive
+      busy={deleteBusy}
+      onCancel={() => setPendingDelete(null)}
+      onConfirm={() => { if (pendingDelete) void deleteCustomer(pendingDelete); }}
     />
   </div>;
 }
