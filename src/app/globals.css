@@ -150,7 +150,8 @@ html[data-theme="dark"] .receiving-readonly-notice {
   background-color: #39301e !important;
   color: #fff3cf !important;
 }
-html[data-theme="dark"] .quick-customer-form-footer {
+html[data-theme="dark"] .quick-customer-form-footer,
+html[data-theme="dark"] .customer-form-footer {
   border-color: #354352 !important;
   background-color: rgb(28 39 52 / 95%) !important;
 }

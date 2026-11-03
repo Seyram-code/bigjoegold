@@ -447,7 +447,7 @@ export function CustomerManagement({
             </div>
           </div>
           {duplicates.length > 0 && <AlertDialog open title="Possible duplicate customers" variant="warning" description={`Review these profiles before continuing. You can still add this customer if they are a different person or business.\n\n${duplicates.map((duplicate) => `${duplicate.name} · ${duplicate.code} — ${duplicate.reasons.join(", ")}${duplicate.phone ? ` · ${duplicate.phone}` : ""}`).join("\n")}`} onConfirm={() => {}} />}
-          <div className="sticky bottom-0 z-10 -mx-5 mt-5 flex justify-between gap-2 border-t border-[#e8edf3] bg-[#fbfcfe]/95 px-5 pb-1 pt-4 backdrop-blur sm:-mx-6 sm:px-6">
+          <div className="customer-form-footer sticky bottom-0 z-10 -mx-5 mt-5 flex justify-between gap-2 border-t border-[#e8edf3] bg-[#fbfcfe]/95 px-5 pb-1 pt-4 backdrop-blur sm:-mx-6 sm:px-6">
             <Button type="button" variant="outline" disabled={form.formState.isSubmitting} onClick={closeForm}><X size={15} /> Cancel</Button>
             <div className="flex gap-2">
               {duplicates.length > 0 && <Button type="button" variant="outline" onClick={() => { setDuplicates([]); setDuplicateConfirmed(false); }}>Review matches first</Button>}
