@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CalendarDays, ChevronDown, CircleDot, Download, Eye, FileText, Filter, Mail, MapPin, MoreHorizontal, Pencil, Plus, RotateCcw, UserRound, Users, X, type LucideIcon } from "lucide-react";
+import { CalendarDays, ChevronDown, CircleDot, Download, Eye, FileText, Filter, LoaderCircle, Mail, MapPin, MoreHorizontal, Pencil, Plus, RotateCcw, UserRound, Users, X, type LucideIcon } from "lucide-react";
 import { customerSchema, type CustomerInput } from "@/lib/validation";
 import { useToast } from "@/components/ui/toast-provider";
 import { Button } from "@/components/ui/button";
@@ -397,7 +397,7 @@ export function CustomerManagement({
           <div><h2 id="customer-form-title" className="text-2xl font-bold tracking-tight text-[#17212f]">{editing ? "Edit Customer" : "Add New Customer"}</h2><p className="mt-1 text-sm text-[#637083]">{editing ? `Update the details for ${editing.name}.` : "Create a new customer and register their information."}</p></div>
           <button type="button" onClick={closeForm} aria-label="Close customer form" disabled={form.formState.isSubmitting} className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6] disabled:opacity-50"><X size={16} /></button>
         </div>
-        <form onSubmit={form.handleSubmit((values) => void save(values, duplicateConfirmed && duplicates.length > 0))} className="mt-5">
+        <form onSubmit={form.handleSubmit((values) => save(values, duplicateConfirmed && duplicates.length > 0))} className="mt-5">
           <div className="grid items-start gap-3 lg:grid-cols-2">
             <section className="rounded-xl border border-[#e8edf3] bg-white p-4 sm:p-5">
               <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-[#17212f]"><span className="flex size-8 items-center justify-center rounded-lg bg-[#f5e3b0] text-[#795719]"><UserRound size={17} /></span>Personal Information</h3>
@@ -411,10 +411,12 @@ export function CustomerManagement({
                       <input id="customer-phone" type="tel" required autoComplete="tel-national" placeholder="Enter phone number" {...form.register("phone")} className="h-full min-w-0 flex-1 px-3 text-[13px] text-[#263241] outline-none placeholder:text-[#a0a8b2]" />
                     </div>
                   </FormField>
-                  <FormField label="Email Address" htmlFor="customer-email" error={form.formState.errors.email?.message}>
-                    <div className="relative"><Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8792a0]" /><input id="customer-email" type="email" placeholder="Enter email address" {...form.register("email")} className={`${fieldControlClass} pl-9`} autoComplete="email" /></div>
-                  </FormField>
-                  <FormField label="Date of Birth *" htmlFor="customer-dob" error={form.formState.errors.dateOfBirth?.message}><GhanaDateInput id="customer-dob" value={form.watch("dateOfBirth") ?? ""} required onChange={(dateOfBirth) => form.setValue("dateOfBirth", dateOfBirth, { shouldValidate: true, shouldDirty: true })} /></FormField>
+                  {editing && <>
+                    <FormField label="Email Address" htmlFor="customer-email" error={form.formState.errors.email?.message}>
+                      <div className="relative"><Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8792a0]" /><input id="customer-email" type="email" placeholder="Enter email address" {...form.register("email")} className={`${fieldControlClass} pl-9`} autoComplete="email" /></div>
+                    </FormField>
+                    <FormField label="Date of Birth *" htmlFor="customer-dob" error={form.formState.errors.dateOfBirth?.message}><GhanaDateInput id="customer-dob" value={form.watch("dateOfBirth") ?? ""} required onChange={(dateOfBirth) => form.setValue("dateOfBirth", dateOfBirth, { shouldValidate: true, shouldDirty: true })} /></FormField>
+                  </>}
                   <FormField label="Gender" htmlFor="customer-gender"><select id="customer-gender" {...form.register("gender")} className={fieldControlClass}><option value="">Select gender</option><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option><option value="PREFER_NOT_TO_SAY">Prefer not to say</option></select></FormField>
                   <FormField label="ID Type" htmlFor="customer-id-type"><select id="customer-id-type" {...form.register("idType")} className={fieldControlClass}><option value="">Select ID type</option><option value="GHANA_CARD">Ghana Card</option><option value="PASSPORT">Passport</option><option value="DRIVERS_LICENSE">Driver’s license</option><option value="VOTER_ID">Voter ID</option><option value="OTHER">Other</option></select></FormField>
                   <FormField label="ID Number" htmlFor="customer-id-number"><input id="customer-id-number" placeholder="Enter ID number" {...form.register("idNumber")} className={fieldControlClass} /></FormField>
@@ -449,7 +451,15 @@ export function CustomerManagement({
             <Button type="button" variant="outline" disabled={form.formState.isSubmitting} onClick={closeForm}><X size={15} /> Cancel</Button>
             <div className="flex gap-2">
               {duplicates.length > 0 && <Button type="button" variant="outline" onClick={() => { setDuplicates([]); setDuplicateConfirmed(false); }}>Review matches first</Button>}
-              <Button type="submit" variant="gold" disabled={form.formState.isSubmitting}>{form.formState.isSubmitting ? "Saving…" : duplicateConfirmed && duplicates.length ? "Add as a separate customer" : editing ? "Save changes" : <><Plus size={15} /> Save Customer</>}</Button>
+              <Button type="submit" variant="gold" disabled={form.formState.isSubmitting} aria-busy={form.formState.isSubmitting}>
+                {form.formState.isSubmitting
+                  ? <><LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> Saving…</>
+                  : duplicateConfirmed && duplicates.length
+                    ? "Add as a separate customer"
+                    : editing
+                      ? "Save changes"
+                      : <><Plus size={15} /> Save Customer</>}
+              </Button>
             </div>
           </div>
         </form>
