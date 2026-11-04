@@ -532,7 +532,7 @@ export function CustomerManagement({
     }
   }
 
-  const groupLabel = kind === "SUPPLIER" ? "Receiving-stock suppliers" : "Sales customers";
+  const groupLabel = kind === "SUPPLIER" ? "Customers" : "Suppliers";
   const previewInvalidRows = importRows.flatMap(({ rowNumber, data }) => {
     const parsed = customerImportRowSchema.safeParse(data);
     return parsed.success ? [] : [{
@@ -659,7 +659,7 @@ export function CustomerManagement({
                     <FormField label="Email Address" htmlFor="customer-email" error={form.formState.errors.email?.message}>
                       <div className="relative"><Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8792a0]" /><input id="customer-email" type="email" placeholder="Enter email address" {...form.register("email")} className={`${fieldControlClass} pl-9`} autoComplete="email" /></div>
                     </FormField>
-                    <FormField label="Date of Birth *" htmlFor="customer-dob" error={form.formState.errors.dateOfBirth?.message}><GhanaDateInput id="customer-dob" value={form.watch("dateOfBirth") ?? ""} required onChange={(dateOfBirth) => form.setValue("dateOfBirth", dateOfBirth, { shouldValidate: true, shouldDirty: true })} /></FormField>
+                    <FormField label="Date of Birth (Optional)" htmlFor="customer-dob" error={form.formState.errors.dateOfBirth?.message}><GhanaDateInput id="customer-dob" value={form.watch("dateOfBirth") ?? ""} onChange={(dateOfBirth) => form.setValue("dateOfBirth", dateOfBirth, { shouldValidate: true, shouldDirty: true })} /></FormField>
                   </>}
                   <FormField label="Gender" htmlFor="customer-gender"><select id="customer-gender" {...form.register("gender")} className={fieldControlClass}><option value="">Select gender</option><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option><option value="PREFER_NOT_TO_SAY">Prefer not to say</option></select></FormField>
                   <FormField label="ID Type" htmlFor="customer-id-type"><select id="customer-id-type" {...form.register("idType")} className={fieldControlClass}><option value="">Select ID type</option><option value="GHANA_CARD">Ghana Card</option><option value="PASSPORT">Passport</option><option value="DRIVERS_LICENSE">Driver’s license</option><option value="VOTER_ID">Voter ID</option><option value="OTHER">Other</option></select></FormField>

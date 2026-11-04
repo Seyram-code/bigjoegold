@@ -132,6 +132,7 @@ model User {
   boardPrices             GoldBoardPrice[]
   manualMomoAccounts      ManualMomoAccount[]
   manualMomoEntries       ManualMomoEntry[]
+  manualMomoContacts      ManualMomoContact[]
   auditLogs               AuditLog[]
 }
 
@@ -642,6 +643,21 @@ model ManualMomoEntry {
 
   @@index([accountId, transactionDate])
   @@index([customerName, transactionDate])
+}
+
+model ManualMomoContact {
+  id              String   @id @default(cuid())
+  name            String   @db.VarChar(120)
+  phone           String?  @db.VarChar(40)
+  phoneNormalized String?  @unique @db.VarChar(20)
+  email           String?  @db.VarChar(254)
+  notes           String?  @db.VarChar(500)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdById     String
+  createdBy       User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([name])
 }
 
 model CashMovement {

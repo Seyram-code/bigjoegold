@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { prepareReceivingForSave } from "@/lib/receiving";
 import { receivingSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
-import { purchaseConfirmationSms, sendOwnerSms } from "@/lib/sms";
+import { purchaseConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
 import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET() {
@@ -60,6 +60,17 @@ export async function POST(request: Request) {
       after(async () => {
         try {
           const supplier = await prisma.customer.findUnique({ where: { id: trade.customerId ?? "" }, select: { name: true } });
+          if (trade.paymentAmount.greaterThan(0)) {
+            try {
+              const initialPayment = await prisma.payment.findFirst({
+                where: { tradeId: trade.id },
+                select: { id: true },
+              });
+              if (initialPayment) await sendOwnerPaymentSms(initialPayment.id, user.name);
+            } catch (error) {
+              console.error("Purchase payment was saved, but its owner SMS could not be prepared.", error);
+            }
+          }
           await sendOwnerSms(purchaseConfirmationSms({
             reference: trade.reference,
             supplierName: supplier?.name ?? "Unknown supplier",

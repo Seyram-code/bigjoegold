@@ -7,6 +7,7 @@ import { buyerFinanceSchema } from "@/lib/validation";
 import { calculateBuyerFinanceBalance, recordBuyerFinanceAdvance } from "@/lib/buyer-financing";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerTransactionEmail } from "@/lib/email";
+import { sendOwnerPaymentSms } from "@/lib/sms";
 
 export async function GET(request: Request) {
   try {
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
     const input = buyerFinanceSchema.parse(await readJson(request));
     const result = await recordBuyerFinanceAdvance(user.id, input);
     after(async () => {
+      await sendOwnerPaymentSms(result.paymentId, user.name);
       try {
         const payment = await prisma.payment.findUniqueOrThrow({
           where: { id: result.paymentId },

@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { postSale } from "@/lib/sales";
 import { saleSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
-import { saleConfirmationSms, sendOwnerSms } from "@/lib/sms";
+import { saleConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
 import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET(request: Request) {
@@ -100,6 +100,9 @@ export async function POST(request: Request) {
     const input = saleSchema.parse(await readJson(request));
     const sale = await postSale(user, input);
     after(async () => {
+      for (const payment of sale.payments) {
+        await sendOwnerPaymentSms(payment.id, user.name);
+      }
       await sendOwnerSms(saleConfirmationSms({
         reference: sale.reference,
         customerName: sale.customer?.name,

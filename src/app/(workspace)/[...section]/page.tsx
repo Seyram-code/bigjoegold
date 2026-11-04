@@ -11,6 +11,7 @@ import { FinanceManagement, type FinanceView } from "@/components/finance-manage
 import { ReportsDashboard } from "@/components/reports-dashboard";
 import { FinancingManagement } from "@/components/financing-management";
 import { ManualMomo } from "@/components/manual-momo";
+import { ManualMomoContacts } from "@/components/manual-momo-contacts";
 import { getWorkspaceView, type WorkspaceModule, type WorkspaceView } from "@/lib/workspace-navigation";
 
 export const dynamic = "force-dynamic";
@@ -106,6 +107,9 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   }
   if (path === "/manual-momo") {
     return <ManualMomo canWrite={Boolean(user && can(user.role, "payments:write", user.permissions))} />;
+  }
+  if (path === "/manual-momo/contacts") {
+    return <ManualMomoContacts canWrite={Boolean(user && can(user.role, "payments:write", user.permissions))} />;
   }
   if (path.startsWith("/sales/")) {
     const salesView = path.endsWith("/new-sale") ? "new"

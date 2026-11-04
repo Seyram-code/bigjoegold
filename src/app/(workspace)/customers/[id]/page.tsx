@@ -53,12 +53,12 @@ export default async function CustomerProfilePage({ params }: { params: Promise<
 
   return <div className="space-y-6">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-3"><Button asChild variant="outline" size="sm"><Link href={customer.kind === "SUPPLIER" ? "/receiving-suppliers" : "/customers"}><ArrowLeft size={14} /> {customer.kind === "SUPPLIER" ? "Receiving Stock Suppliers" : "Sales Customers"}</Link></Button><Badge tone={customer.isActive ? "green" : "neutral"}>{customer.isActive ? "Active" : "Archived"}</Badge></div>
+      <div className="flex items-center gap-3"><Button asChild variant="outline" size="sm"><Link href={customer.kind === "SUPPLIER" ? "/receiving-suppliers" : "/customers"}><ArrowLeft size={14} /> {customer.kind === "SUPPLIER" ? "Customers" : "Suppliers"}</Link></Button><Badge tone={customer.isActive ? "green" : "neutral"}>{customer.isActive ? "Active" : "Archived"}</Badge></div>
       {can(user.role, "customers:export", user.permissions) && <a href={`/api/customers/export?kind=${customer.kind}&status=ALL&q=${encodeURIComponent(customer.code)}`} className="text-xs font-semibold text-[#a4772c] hover:underline">Export customer report</a>}
     </div>
     <div className="flex items-start gap-4">
       <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-[#f5e3b0] text-[#795719]"><UserRound size={22} /></span>
-      <div className="min-w-0"><p className="font-mono text-xs text-[#89929d]">{customer.code}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#17212f]">{customer.name}</h1><p className="mt-1 text-sm text-[#76808c]">{customer.kind === "SUPPLIER" ? "Receiving-stock supplier" : "Sales customer"} · {customer.type === "BUSINESS" ? "Business" : "Individual"} · Added {customer.createdAt.toLocaleDateString("en-GH", { day: "numeric", month: "long", year: "numeric" })}</p></div>
+      <div className="min-w-0"><p className="font-mono text-xs text-[#89929d]">{customer.code}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#17212f]">{customer.name}</h1><p className="mt-1 text-sm text-[#76808c]">{customer.kind === "SUPPLIER" ? "Customer" : "Supplier"} · {customer.type === "BUSINESS" ? "Business" : "Individual"} · Added {customer.createdAt.toLocaleDateString("en-GH", { day: "numeric", month: "long", year: "numeric" })}</p></div>
     </div>
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

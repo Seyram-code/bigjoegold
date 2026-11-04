@@ -1,4 +1,5 @@
 import { formatCurrencyExact, formatWeight } from "@/lib/formatters";
+import { prisma } from "@/lib/prisma";
 
 const FROG_SEND_URL = "https://frogapi.wigal.com.gh/api/v3/sms/send";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -30,6 +31,25 @@ function frogConfig(): FrogConfig | null {
 function compact(value: string) { return value.replace(/\s+/g, " ").trim(); }
 function paymentMethodLabel(method: string) { return method.replaceAll("_", " ").toLowerCase(); }
 
+function rejectionDetails(body: unknown, config: FrogConfig) {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return {};
+  const details = body as Record<string, unknown>;
+  const safeValue = (value: unknown) => {
+    if (typeof value !== "string" && typeof value !== "number") return undefined;
+    let result = String(value).replace(/\s+/g, " ").trim();
+    for (const secret of [config.apiKey, config.username, config.senderId, config.ownerPhone]) {
+      if (secret.length >= 4) result = result.replaceAll(secret, "[redacted]");
+    }
+    return result.slice(0, 240);
+  };
+  const providerCode = safeValue(details.code);
+  const providerMessage = safeValue(details.message) ?? safeValue(details.error);
+  return {
+    ...(providerCode ? { providerCode } : {}),
+    ...(providerMessage ? { providerMessage } : {}),
+  };
+}
+
 export function purchaseConfirmationSms(notification: PurchaseSms) {
   return compact(`BJG purchase ${notification.reference} confirmed. Supplier: ${notification.supplierName}. Weight: ${formatWeight(notification.quantityKg)}. Value: ${formatCurrencyExact(notification.totalAmount)}. Paid: ${formatCurrencyExact(notification.amountPaid)}. By: ${notification.recordedBy}.`);
 }
@@ -43,6 +63,41 @@ export function paymentConfirmationSms(notification: PaymentSms) {
   return compact(`BJG payment ${notification.reference} confirmed. ${notification.direction.toLowerCase()} ${formatCurrencyExact(notification.amount)} via ${paymentMethodLabel(notification.method)} ${subject}. By: ${notification.recordedBy}.`);
 }
 
+export async function sendOwnerPaymentSms(paymentId: string, recordedBy: string) {
+  try {
+    const payment = await prisma.payment.findUniqueOrThrow({
+      where: { id: paymentId },
+      include: {
+        customer: { select: { name: true } },
+        trade: { select: { reference: true } },
+        customerAdvance: { select: { reference: true } },
+        buyerFinanceAccount: { select: { reference: true } },
+        saleCorrection: {
+          select: {
+            reference: true,
+            trade: { select: { reference: true } },
+          },
+        },
+      },
+    });
+    const tradeReference = payment.trade?.reference
+      ?? payment.saleCorrection?.trade.reference
+      ?? payment.customerAdvance?.reference
+      ?? payment.buyerFinanceAccount?.reference;
+    await sendOwnerSms(paymentConfirmationSms({
+      reference: payment.reference,
+      direction: payment.direction,
+      amount: payment.amount.toString(),
+      method: payment.method,
+      customerName: payment.customer?.name,
+      tradeReference,
+      recordedBy,
+    }));
+  } catch (error) {
+    console.error("Payment was recorded, but its owner SMS could not be prepared.", error);
+  }
+}
+
 /** A provider outage must never reverse a posted financial or inventory record. */
 export async function sendOwnerSms(message: string) {
   const config = frogConfig();
@@ -51,11 +106,23 @@ export async function sendOwnerSms(message: string) {
     const response = await fetch(FROG_SEND_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "API-KEY": config.apiKey, USERNAME: config.username },
-      body: JSON.stringify({ senderid: config.senderId, destinations: [{ destination: config.ownerPhone, msgid: crypto.randomUUID() }], message, smstype: "text" }),
+      body: JSON.stringify({
+        senderid: config.senderId,
+        destinations: [{
+          destination: config.ownerPhone,
+          message,
+          msgid: crypto.randomUUID(),
+          smstype: "text",
+        }],
+      }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
-      console.error("Owner SMS could not be queued by Wigal FROG.", { status: response.status });
+      const body = await response.json().catch(() => null) as unknown;
+      console.error("Owner SMS could not be queued by Wigal FROG.", {
+        status: response.status,
+        ...rejectionDetails(body, config),
+      });
       return false;
     }
     const body = await response.json().catch(() => null) as { status?: string } | null;

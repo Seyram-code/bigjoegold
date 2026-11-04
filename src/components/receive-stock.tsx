@@ -220,7 +220,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
   const karatLimitError = calculation.error.includes("Calculated karat exceeds 24");
   const amountPaid = amountPaidTouched
     ? values.amountPaid
-    : calculation.result?.amount.toFixed(2) ?? "0.00";
+    : "0";
   const paymentAmountValid = /^\d{1,14}(?:\.\d{1,2})?$/.test(amountPaid);
   const paymentError = !financingAccountId && calculation.result && paymentAmountValid && calculation.result.amount.lessThan(amountPaid)
     ? "Amount paid cannot exceed the calculated purchase amount."
@@ -570,20 +570,20 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
     </Card>
 
     <Card className="rounded-[10px] xl:col-span-2">
-      <CardHeader className="px-3 pb-2 pt-2.5"><CardTitle className="text-[13px]">Payment information</CardTitle></CardHeader>
+      <CardHeader className="px-3 pb-2 pt-2.5"><CardTitle className="text-[13px]">Payment information (optional)</CardTitle></CardHeader>
       <CardContent className="grid gap-2 px-3 pb-3 sm:grid-cols-2 xl:grid-cols-4">
           <FormField label="Payment method" htmlFor="receiving-method">
             <select id="receiving-method" value={values.paymentMethod} onChange={(event) => updateField("paymentMethod", event.target.value)} className={`${fieldControlClass}`}>
               {paymentMethods.map((method) => <option key={method} value={method}>{method.replaceAll("_", " ")}</option>)}
             </select>
           </FormField>
-          <FormField label="Cash / bank account" htmlFor="receiving-account" hint={financingAccountId ? "Not used when buyer financing is applied." : "Required when an amount is paid."}>
+          <FormField label="Cash / bank account" htmlFor="receiving-account" hint={financingAccountId ? "Not used when buyer financing is applied." : "Required only when recording a payment."}>
             <select id="receiving-account" disabled={Boolean(financingAccountId)} value={values.cashAccountId} onChange={(event) => updateField("cashAccountId", event.target.value)} className={`${fieldControlClass}`}>
               <option value="">Select an account</option>
               {cashAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.type.replaceAll("_", " ")}</option>)}
             </select>
           </FormField>
-          <FormField label={financingAccountId ? "Financed purchase value (GHS)" : "Amount paid (GHS)"} htmlFor="receiving-paid" hint={financingAccountId ? "No cash payment is recorded. The calculated gold value settles the financing balance." : "Defaults to the calculated actual gold amount; edit if a different amount was paid."}>
+          <FormField label={financingAccountId ? "Financed purchase value (GHS)" : "Amount paid (GHS)"} htmlFor="receiving-paid" hint={financingAccountId ? "No cash payment is recorded. The calculated gold value settles the financing balance." : "Optional; defaults to GHS 0. Enter an amount only if a payment was made."}>
             <GhanaAmountInput id="receiving-paid" min="0" step="0.01" disabled={Boolean(financingAccountId)} value={financingAccountId ? calculation.result?.amount.toFixed(2) ?? "0.00" : amountPaid} onChange={(value) => updateField("amountPaid", value)} onBlur={() => { if (!values.amountPaid.trim() && amountPaidTouched) { setValues((current) => ({ ...current, amountPaid: "0" })); setAmountPaidTouched(false); } }} className={`${fieldControlClass} ${financingAccountId ? "bg-[#f7f8fa]" : ""}`} />
           </FormField>
           <FormField label="Outstanding (GHS)" htmlFor="receiving-balance">

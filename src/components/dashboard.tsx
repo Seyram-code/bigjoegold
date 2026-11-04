@@ -109,6 +109,10 @@ export function Dashboard({
     try {
       const params = new URLSearchParams({ from: selectedFrom, to: selectedTo });
       const response = await fetch(`/api/dashboard?${params}`, { cache: "no-store" });
+      if (response.status === 401 || response.status === 403) {
+        window.location.assign("/login");
+        return;
+      }
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Unable to load dashboard");
       setError("");

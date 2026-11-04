@@ -7,7 +7,7 @@ import { apiError, HttpError, readJson } from "@/lib/http";
 import { paymentSchema } from "@/lib/validation";
 import { recordPaymentMovement } from "@/lib/finance";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
-import { paymentConfirmationSms, sendOwnerSms } from "@/lib/sms";
+import { sendOwnerPaymentSms } from "@/lib/sms";
 import { sendOwnerTransactionEmail } from "@/lib/email";
 
 export async function GET() {
@@ -90,34 +90,30 @@ export async function POST(request: Request) {
       await addAudit(tx, { userId: user.id, action: "payment.recorded", entity: "Payment", entityId: created.id, details: { reference: created.reference, amount: input.amount, direction: input.direction } });
       return created;
     });
-    const paymentDetails = await prisma.payment.findUniqueOrThrow({
-      where: { id: payment.id },
-      include: {
-        customer: { select: { name: true } },
-        trade: { select: { reference: true } },
-      },
-    });
     after(async () => {
-      await sendOwnerTransactionEmail({
-        type: "PAYMENT",
-        reference: paymentDetails.reference,
-        direction: paymentDetails.direction,
-        amount: paymentDetails.amount.toString(),
-        method: paymentDetails.method,
-        customerName: paymentDetails.customer?.name,
-        tradeReference: paymentDetails.trade?.reference,
-        recordedBy: user.name,
-      });
+      await sendOwnerPaymentSms(payment.id, user.name);
+      try {
+        const paymentDetails = await prisma.payment.findUniqueOrThrow({
+          where: { id: payment.id },
+          include: {
+            customer: { select: { name: true } },
+            trade: { select: { reference: true } },
+          },
+        });
+        await sendOwnerTransactionEmail({
+          type: "PAYMENT",
+          reference: paymentDetails.reference,
+          direction: paymentDetails.direction,
+          amount: paymentDetails.amount.toString(),
+          method: paymentDetails.method,
+          customerName: paymentDetails.customer?.name,
+          tradeReference: paymentDetails.trade?.reference,
+          recordedBy: user.name,
+        });
+      } catch (error) {
+        console.error("Payment was recorded, but its owner email notification could not be prepared.", error);
+      }
     });
-    await sendOwnerSms(paymentConfirmationSms({
-      reference: paymentDetails.reference,
-      direction: paymentDetails.direction,
-      amount: paymentDetails.amount.toString(),
-      method: paymentDetails.method,
-      customerName: paymentDetails.customer?.name,
-      tradeReference: paymentDetails.trade?.reference,
-      recordedBy: user.name,
-    }));
     return Response.json(payment, { status: 201 });
   } catch (error) {
     return apiError(error);

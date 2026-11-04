@@ -10,6 +10,7 @@ import { ledgerBalances, resolveStorageLocation } from "@/lib/inventory";
 import { recordPaymentMovement } from "@/lib/finance";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerTransactionEmail } from "@/lib/email";
+import { saleConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
 
 export async function GET(request: Request) {
   try {
@@ -194,6 +195,17 @@ export async function POST(request: Request) {
         .filter((payment) => payment.direction === "INBOUND")
         .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
       after(async () => {
+        for (const payment of trade.payments) {
+          await sendOwnerPaymentSms(payment.id, user.name);
+        }
+        await sendOwnerSms(saleConfirmationSms({
+          reference: trade.reference,
+          customerName: trade.customer?.name,
+          quantityKg: trade.quantityKg.toString(),
+          totalAmount: trade.totalAmount.toString(),
+          amountPaid: amountPaid.toString(),
+          recordedBy: user.name,
+        }));
         await sendOwnerTransactionEmail({
           type: "SALE",
           reference: trade.reference,

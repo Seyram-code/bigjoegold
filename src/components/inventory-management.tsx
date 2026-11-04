@@ -32,7 +32,16 @@ type Lot = {
   pounds: string | number | null;
   status: "ACTIVE" | "DEPLETED" | "QUARANTINED";
   storageLocation: { id: string; name: string } | null;
-  trade: { reference: string } | null;
+  trade: {
+    reference: string;
+    purchaseMeasurement: {
+      topKg: string | number;
+      downKg: string | number;
+      pounds: string | number;
+      density: string | number;
+      karat: string | number;
+    } | null;
+  } | null;
 };
 
 type Movement = {
@@ -234,6 +243,11 @@ export function InventoryManagement({
     {["current", "batches", "alerts"].includes(view) && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Metric label="Ledger stock" value={formatWeight(activeWeightKg, "kg", 2)} />
       {view === "current" && <Metric label="Available stock" value={formatWeight(activeWeightKg * 1000, "g", 2)} />}
+      <Metric label="Available top" value={formatWeight(Number(summary.topGrams ?? 0), "g", 2)} />
+      <Metric label="Available down" value={formatWeight(Number(summary.downGrams ?? 0), "g", 2)} />
+      <Metric label="Available pounds" value={summary.pounds === null ? "—" : `${formatDecimalTruncated(summary.pounds ?? 0, 2)} lb`} />
+      <Metric label="Available density" value={summary.density === null ? "—" : formatDecimalTruncated(summary.density ?? 0, 2)} />
+      <Metric label="Available karat" value={summary.karat === null ? "—" : formatDecimalTruncated(summary.karat ?? 0, 2)} />
       <Metric label="Stock cost value" value={formatCurrency(Number(summary.costValue ?? 0))} />
       <Metric label="Active batches" value={String(summary.batchCount ?? 0)} />
     </div>}
@@ -341,5 +355,13 @@ function ReasonField({ id, value, onChange }: { id: string; value: string; onCha
 }
 
 function LotsTable({ lots, showAlerts }: { lots: Lot[]; showAlerts: boolean }) {
-  return <Card><CardHeader><CardTitle>{showAlerts ? "Batches needing attention" : "Stock by batch"}</CardTitle><p className="mt-1 text-xs text-[#75808d]">Remaining quantity is derived from the batch’s recorded stock movements.</p></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[1100px] border-collapse text-left text-xs"><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Batch / source</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Weight (g)</th><th className="px-4 py-3">Weight lb</th><th className="px-4 py-3">Purity</th><th className="px-4 py-3">Density</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Cost / g</th><th className="px-4 py-3">Remaining (g)</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{lots.map((lot) => <tr key={lot.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3 font-medium text-[#344151]">{lot.batchNumber || lot.trade?.reference || "—"}<span className="block text-[10px] text-[#87919d]">{lot.source || lot.trade?.reference || "Unknown source"}</span></td><td className="px-4 py-3">{new Date(lot.receivedAt).toLocaleDateString("en-GH")}</td><td className="px-4 py-3">{formatWeight(lot.originalGrams, "g", 2)}</td><td className="px-4 py-3">{lot.pounds === null ? "—" : formatDecimalTruncated(lot.pounds, 2)}</td><td className="px-4 py-3">{formatDecimalTruncated(lot.purityBps / 100, 2)}%</td><td className="px-4 py-3">{lot.density === null ? "—" : formatDecimalTruncated(lot.density, 2)}</td><td className="px-4 py-3">{lot.storageLocation?.name ?? "—"}</td><td className="px-4 py-3">{formatCurrency(Number(lot.costPerGram))}</td><td className="px-4 py-3 font-semibold text-[#344151]">{formatWeight(lot.ledgerBalanceGrams, "g", 2)}</td><td className="px-4 py-3"><Badge tone={lot.cacheMismatch || Number(lot.ledgerBalanceGrams) < 0 ? "red" : lot.status === "DEPLETED" ? "gold" : "green"}>{lot.cacheMismatch ? "Ledger mismatch" : Number(lot.ledgerBalanceGrams) < 0 ? "Negative ledger" : lot.status}</Badge></td></tr>)}</tbody></table>{lots.length === 0 && <p className="p-8 text-center text-xs text-[#89929d]">{showAlerts ? "No stock reconciliation alerts." : "No stock batches have been recorded."}</p>}</CardContent></Card>;
+  return <Card><CardHeader><CardTitle>{showAlerts ? "Batches needing attention" : "Stock by batch"}</CardTitle><p className="mt-1 text-xs text-[#75808d]">Remaining quantity is derived from the batch’s recorded stock movements.</p></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[1500px] border-collapse text-left text-xs"><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Batch / source</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Weight (g)</th><th className="px-4 py-3">Top (g)</th><th className="px-4 py-3">Down (g)</th><th className="px-4 py-3">Pounds</th><th className="px-4 py-3">Density</th><th className="px-4 py-3">Karat</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Cost / g</th><th className="px-4 py-3">Remaining (g)</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{lots.map((lot) => {
+    const measurement = lot.trade?.purchaseMeasurement;
+    const topGrams = measurement ? Number(measurement.topKg) * 1000 : null;
+    const downGrams = measurement ? Number(measurement.downKg) * 1000 : null;
+    const pounds = measurement?.pounds ?? lot.pounds;
+    const density = measurement?.density ?? lot.density;
+    const karat = measurement?.karat ?? lot.purityBps / 10000 * 24;
+    return <tr key={lot.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3 font-medium text-[#344151]">{lot.batchNumber || lot.trade?.reference || "—"}<span className="block text-[10px] text-[#87919d]">{lot.source || lot.trade?.reference || "Unknown source"}</span></td><td className="px-4 py-3">{new Date(lot.receivedAt).toLocaleDateString("en-GH")}</td><td className="px-4 py-3">{formatWeight(lot.originalGrams, "g", 2)}</td><td className="px-4 py-3">{topGrams === null ? "—" : formatDecimalTruncated(topGrams, 2)}</td><td className="px-4 py-3">{downGrams === null ? "—" : formatDecimalTruncated(downGrams, 2)}</td><td className="px-4 py-3">{pounds === null ? "—" : formatDecimalTruncated(pounds, 2)}</td><td className="px-4 py-3">{density === null ? "—" : formatDecimalTruncated(density, 2)}</td><td className="px-4 py-3">{formatDecimalTruncated(karat, 2)}</td><td className="px-4 py-3">{lot.storageLocation?.name ?? "—"}</td><td className="px-4 py-3">{formatCurrency(Number(lot.costPerGram))}</td><td className="px-4 py-3 font-semibold text-[#344151]">{formatWeight(lot.ledgerBalanceGrams, "g", 2)}</td><td className="px-4 py-3"><Badge tone={lot.cacheMismatch || Number(lot.ledgerBalanceGrams) < 0 ? "red" : lot.status === "DEPLETED" ? "gold" : "green"}>{lot.cacheMismatch ? "Ledger mismatch" : Number(lot.ledgerBalanceGrams) < 0 ? "Negative ledger" : lot.status}</Badge></td></tr>;
+  })}</tbody></table>{lots.length === 0 && <p className="p-8 text-center text-xs text-[#89929d]">{showAlerts ? "No stock reconciliation alerts." : "No stock batches have been recorded."}</p>}</CardContent></Card>;
 }

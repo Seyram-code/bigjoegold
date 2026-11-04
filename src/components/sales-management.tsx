@@ -136,7 +136,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
       total: measurement.result.total,
     };
   }, [measurementConfirmed, allocations.length, measurement.result, allocatedGramsDecimal]);
-  const amountPaid = paymentAmountTouched ? initialPayment : quote?.total.toFixed(2) ?? "0.00";
+  const amountPaid = paymentAmountTouched ? initialPayment : "0";
   const selectedBuyer = buyers.find((buyer) => buyer.id === buyerId);
   const selectedLot = lots.find((lot) => lot.id === selectedLotId);
   const availableStockGrams = lots.filter((lot) => lot.status === "ACTIVE").reduce((sum, lot) => sum + Math.max(0, Number(lot.remainingGrams)), 0);
@@ -226,6 +226,12 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [measurementModalOpen]);
+
+  function selectSaleLot(lotId: string) {
+    setSelectedLotId(lotId);
+    const lot = lots.find((item) => item.id === lotId);
+    setSelectedLotGrams(lot ? String(lot.remainingGrams) : "");
+  }
 
   function addSelectedBatch() {
     setError("");
@@ -461,7 +467,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
             <CardHeader><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-[#f5e3b0] text-[#795719]"><Coins size={16} /></span><CardTitle>Gold Details</CardTitle></div><p className="text-xs text-[#89929d]">Available stock: {formatWeight(availableStockGrams, "g", 2)}</p></CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="Stock batch" htmlFor="sale-batch"><StockAutocomplete id="sale-batch" value={selectedLotId} onChange={setSelectedLotId} placeholder="Search available batches" lots={lots.filter((lot) => lot.status === "ACTIVE" && Number(lot.remainingGrams) > 0).map((lot): StockOption => ({ id: lot.id, source: lot.source || lot.trade?.customer?.name || "Unknown source", batchNumber: lot.batchNumber || lot.trade?.reference || "Unnumbered batch", receivedAt: lot.receivedAt, grams: lot.remainingGrams }))} /></FormField>
+                <FormField label="Stock batch" htmlFor="sale-batch"><StockAutocomplete id="sale-batch" value={selectedLotId} onChange={selectSaleLot} placeholder="Search available batches" lots={lots.filter((lot) => lot.status === "ACTIVE" && Number(lot.remainingGrams) > 0).map((lot): StockOption => ({ id: lot.id, source: lot.source || lot.trade?.customer?.name || "Unknown source", batchNumber: lot.batchNumber || lot.trade?.reference || "Unnumbered batch", receivedAt: lot.receivedAt, grams: lot.remainingGrams }))} /></FormField>
                 <div className="flex items-end gap-2"><FormField label="Batch weight (grams)" htmlFor="sale-batch-grams"><input id="sale-batch-grams" type="number" min="0.00001" max={selectedLot ? Number(selectedLot.remainingGrams) : undefined} step="0.00001" value={selectedLotGrams} onChange={(event) => setSelectedLotGrams(event.target.value)} className={fieldControlClass} placeholder="Enter grams" /></FormField><Button type="button" variant="outline" className="mb-0.5 h-10 shrink-0" disabled={!selectedLot || !selectedLotGrams} onClick={addSelectedBatch}><Plus size={14} /> Add batch</Button></div>
               </div>
               {allocations.length > 0 ? <div className="space-y-2 rounded-lg border border-[#edf0f3] p-3">
@@ -494,11 +500,11 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
           </Card>
 
           <Card>
-            <CardHeader><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-[#f5e3b0] text-[#795719]"><WalletCards size={16} /></span><CardTitle>Payment Information</CardTitle></div></CardHeader>
+            <CardHeader><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-[#f5e3b0] text-[#795719]"><WalletCards size={16} /></span><CardTitle>Payment Information (Optional)</CardTitle></div></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
               <FormField label="Payment method" htmlFor="sale-method"><select id="sale-method" value={method} onChange={(event) => setMethod(event.target.value)} className={fieldControlClass}>{paymentMethods.map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></FormField>
-              <FormField label="Cash / bank account" htmlFor="sale-account" hint={cashAccounts.length ? "Required when an amount is paid." : "No GHS cash accounts are available."}><select id="sale-account" value={cashAccountId} onChange={(event) => setCashAccountId(event.target.value)} className={fieldControlClass}>{cashAccounts.length === 0 && <option value="" disabled>No GHS cash accounts available</option>}{cashAccounts.filter((account) => account.currency === "GHS").map((account) => <option key={account.id} value={account.id}>{account.name} · {account.type.replaceAll("_", " ")}</option>)}</select></FormField>
-              <FormField label="Amount paid (GHS)" htmlFor="sale-paid" hint={cashAccounts.length ? "Defaults to the full sale total; edit it to match the amount actually received." : "Defaults to the full sale total. A GHS cash account is required to record this payment; set to 0 to record as unpaid, or add an account in Finance."}><GhanaAmountInput id="sale-paid" min="0" step="0.01" required value={amountPaid} onChange={(value) => { setPaymentAmountTouched(true); setInitialPayment(value); }} onBlur={() => { if (!initialPayment.trim()) { setPaymentAmountTouched(false); setInitialPayment("0"); } }} className={fieldControlClass} /></FormField>
+              <FormField label="Cash / bank account" htmlFor="sale-account" hint={cashAccounts.length ? "Required only when recording a payment." : "Optional; a GHS cash account is needed only to record a payment."}><select id="sale-account" value={cashAccountId} onChange={(event) => setCashAccountId(event.target.value)} className={fieldControlClass}><option value="">Select an account (optional)</option>{cashAccounts.filter((account) => account.currency === "GHS").map((account) => <option key={account.id} value={account.id}>{account.name} · {account.type.replaceAll("_", " ")}</option>)}</select></FormField>
+              <FormField label="Amount paid (GHS)" htmlFor="sale-paid" hint="Optional; defaults to GHS 0. Enter an amount only if a payment was received."><GhanaAmountInput id="sale-paid" min="0" step="0.01" value={amountPaid} onChange={(value) => { setPaymentAmountTouched(true); setInitialPayment(value); }} onBlur={() => { if (!initialPayment.trim()) { setPaymentAmountTouched(false); setInitialPayment("0"); } }} className={fieldControlClass} /></FormField>
               <FormField label="Outstanding (GHS)" htmlFor="sale-outstanding"><input id="sale-outstanding" readOnly value={formatCurrency(Math.max(0, (quote?.total.toNumber() ?? 0) - Number(amountPaid || 0)))} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
               {canDiscount && <FormField label="Discount (GHS)" htmlFor="sale-discount"><GhanaAmountInput id="sale-discount" min="0" step="0.01" value={discountAmount} onChange={setDiscountAmount} className={fieldControlClass} /></FormField>}
               {!canDiscount && <p className="self-center text-[11px] text-[#89929d]">Discounts require manager or owner permission.</p>}

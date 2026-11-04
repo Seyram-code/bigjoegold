@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowDownLeft, ArrowUpRight, Printer, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ type Entry = {
   createdBy: string;
 } & ManualMomoStatementEntry;
 type LedgerData = { accounts: Account[]; entries: Entry[] };
+type Contact = { id: string; name: string; phone: string | null };
 
 const today = new Date().toISOString().slice(0, 10);
 const firstOfMonth = `${today.slice(0, 7)}-01`;
@@ -52,6 +54,8 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
   const [from, setFrom] = useState(firstOfMonth);
   const [to, setTo] = useState(today);
   const [data, setData] = useState<LedgerData | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [selectedContactId, setSelectedContactId] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingEntry, setSavingEntry] = useState(false);
   const [savingAccount, setSavingAccount] = useState<string | null>(null);
@@ -81,10 +85,18 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/manual-momo?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: "no-store" });
+      const [response, contactsResponse] = await Promise.all([
+        fetch(`/api/manual-momo?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: "no-store" }),
+        fetch("/api/manual-momo/contacts", { cache: "no-store" }),
+      ]);
       if (!response.ok) throw new Error(await responseError(response));
-      const result = await response.json() as LedgerData;
+      if (!contactsResponse.ok) throw new Error(await responseError(contactsResponse));
+      const [result, contactResult] = await Promise.all([
+        response.json() as Promise<LedgerData>,
+        contactsResponse.json() as Promise<Contact[]>,
+      ]);
       setData(result);
+      setContacts(contactResult);
       setAccountId((current) => result.accounts.some((account) => account.id === current) ? current : result.accounts[0]?.id ?? "");
       setEntryForm((current) => ({
         ...current,
@@ -132,6 +144,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       if (!response.ok) throw new Error(await responseError(response));
       showToast("Manual Bank & MOMO payment recorded. It has not changed the system's payment transactions.");
       setEntryForm((current) => ({ ...current, customerName: "", customerPhone: "", amount: "", transactionReference: "", note: "" }));
+      setSelectedContactId("");
       await loadData();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to record the Manual Bank & MOMO payment.");
@@ -198,7 +211,10 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
         <h1 className="text-xl font-bold text-[#17212f]">Manual Bank &amp; MOMO</h1>
         <p className="mt-1 max-w-3xl text-sm text-[#78818d]">Create separate bank and mobile money ledgers for customer payments. These independent records do not create or change system transactions.</p>
       </div>
-      <Button type="button" variant="outline" onClick={() => void loadData()} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> Refresh</Button>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild type="button" variant="outline"><Link href="/manual-momo/contacts">Manage contacts</Link></Button>
+        <Button type="button" variant="outline" onClick={() => void loadData()} disabled={loading}><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> Refresh</Button>
+      </div>
     </div>
 
     {error && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div>}
@@ -240,6 +256,14 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
           </select></label>
           <label><span className={fieldLabelClass}>Payment direction</span><select value={entryForm.direction} onChange={(event) => setEntryForm((current) => ({ ...current, direction: event.target.value as Direction }))} className={dateInputClass}>
             <option value="INBOUND">Received from customer</option><option value="OUTBOUND">Paid to customer</option>
+          </select></label>
+          <label><span className={fieldLabelClass}>Saved contact (optional)</span><select value={selectedContactId} onChange={(event) => {
+            const contact = contacts.find((item) => item.id === event.target.value);
+            setSelectedContactId(event.target.value);
+            if (contact) setEntryForm((current) => ({ ...current, customerName: contact.name, customerPhone: contact.phone ?? "" }));
+          }} className={dateInputClass}>
+            <option value="">Enter contact manually</option>
+            {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.phone ? ` · ${contact.phone}` : ""}</option>)}
           </select></label>
           <label><span className={fieldLabelClass}>Customer name</span><input required minLength={2} maxLength={120} value={entryForm.customerName} onChange={(event) => setEntryForm((current) => ({ ...current, customerName: event.target.value }))} className={dateInputClass} /></label>
           <label><span className={fieldLabelClass}>Customer phone (optional)</span><input maxLength={40} value={entryForm.customerPhone} onChange={(event) => setEntryForm((current) => ({ ...current, customerPhone: event.target.value }))} className={dateInputClass} /></label>

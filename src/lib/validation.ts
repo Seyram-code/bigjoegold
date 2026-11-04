@@ -45,6 +45,18 @@ export const manualMomoEntrySchema = z.object({
   note: optionalText,
 }).strict();
 
+export const manualMomoContactSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  phone: z.string().trim().max(40).optional().or(z.literal(""))
+    .refine((value) => !value || (value.replace(/\D/g, "").length >= 5 && value.replace(/\D/g, "").length <= 15), "Enter a valid phone number"),
+  email: z.union([z.string().trim().email().max(254), z.literal("")]).optional(),
+  notes: optionalText,
+}).strict();
+
+export const manualMomoContactImportRowSchema = manualMomoContactSchema.extend({
+  phone: z.string().trim().max(40).optional().or(z.literal("")),
+});
+
 export const manualMomoAccountSchema = z.object({
   accountId: z.string().trim().min(1).max(191),
   openingBalance: manualMomoMoney.refine((value) => Number(value) >= 0, "Opening balance cannot be negative"),
@@ -98,9 +110,9 @@ export const saleSchema = z.object({
   purityBps: z.coerce.number().int().min(1).max(10000),
   pricePerGram: salePrice,
   discountAmount: saleMoney,
-  initialPayment: saleMoney,
+  initialPayment: saleMoney.default("0"),
   cashAccountId: z.string().trim().optional().or(z.literal("")),
-  method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
+  method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]).default("CASH"),
   note: optionalText,
   allocations: z.array(z.object({
     lotId: z.string().trim().min(1).max(191),
@@ -275,10 +287,10 @@ export const receivingSchema = z.object({
   topGrams: receivingWeightGrams,
   downGrams: receivingWeightGrams,
   boardPriceId: z.string().trim().min(1).max(191),
-  amountPaid: receivingPayment,
+  amountPaid: receivingPayment.default("0"),
   financingAccountId: z.string().trim().max(191).optional().or(z.literal("")),
   cashAccountId: z.string().trim().optional().or(z.literal("")),
-  paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
+  paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]).default("CASH"),
   batchNumber: z.string().trim().max(120).optional().or(z.literal("")),
   storageLocation: inventoryLocation.default("Main storage"),
   note: optionalText,

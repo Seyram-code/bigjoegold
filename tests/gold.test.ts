@@ -15,7 +15,7 @@ import { inventoryMovementSchema } from "../src/lib/validation";
 import { ledgerBalances, movementBalance } from "../src/lib/inventory";
 import { createBatchCode } from "../src/lib/records";
 import { calculateCashBalances } from "../src/lib/finance";
-import { calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
+import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoStatement } from "../src/lib/manual-momo";
 import { customerAdvanceSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
 
@@ -272,6 +272,13 @@ test("receiving validation rejects zero down-weight and manual calculation overr
     paymentMethod: "CASH",
   };
   assert.equal(receivingSchema.safeParse(valid).success, true);
+  const receivingWithoutPaymentDetails = receivingSchema.parse({
+    ...valid,
+    amountPaid: undefined,
+    paymentMethod: undefined,
+  });
+  assert.equal(receivingWithoutPaymentDetails.amountPaid, "0");
+  assert.equal(receivingWithoutPaymentDetails.paymentMethod, "CASH");
   assert.equal(receivingSchema.safeParse({ ...valid, downGrams: "0" }).success, false);
   assert.equal(receivingSchema.safeParse({ ...valid, pounds: "12" }).success, false);
   const financed = {
@@ -445,6 +452,14 @@ test("sales validation requires explicit batch allocations and audited correctio
     allocations: [{ lotId: "lot-id", grams: "750" }],
   };
   assert.equal(saleSchema.safeParse(validSale).success, true);
+  const saleWithoutPaymentDetails = saleSchema.parse({
+    ...validSale,
+    initialPayment: undefined,
+    cashAccountId: undefined,
+    method: undefined,
+  });
+  assert.equal(saleWithoutPaymentDetails.initialPayment, "0");
+  assert.equal(saleWithoutPaymentDetails.method, "CASH");
   const saleWithoutMeasurements = { ...validSale, topGrams: undefined, downGrams: undefined };
   assert.equal(saleSchema.safeParse(saleWithoutMeasurements).success, false);
   assert.equal(saleSchema.safeParse({ ...validSale, discountAmount: "-1" }).success, false);
@@ -696,6 +711,48 @@ test("dashboard received measurements and current inventory karat are weighted b
     { grams: "3000", purityBps: 7500 },
   ]), 18.9);
   assert.equal(calculateInventoryAverageKarat([]), null);
+});
+
+test("available inventory measurements scale batch weights and weight density and karat by remaining grams", () => {
+  assert.deepEqual(calculateAvailableInventoryMeasurementTotals([
+    {
+      grams: "500",
+      originalGrams: "1000",
+      purityBps: 9000,
+      pounds: null,
+      density: null,
+      measurement: { topKg: "1", downKg: "0.8", pounds: "10", density: "10", karat: "18" },
+    },
+    {
+      grams: "1500",
+      originalGrams: "3000",
+      purityBps: 7500,
+      pounds: null,
+      density: null,
+      measurement: { topKg: "3", downKg: "2.4", pounds: "30", density: "12", karat: "20" },
+    },
+    {
+      grams: "250",
+      originalGrams: "500",
+      purityBps: 8000,
+      pounds: "2",
+      density: "8",
+      measurement: null,
+    },
+  ]), {
+    topGrams: 2250,
+    downGrams: 1600,
+    pounds: 21,
+    density: 11.11111111111111,
+    karat: 19.466666666666665,
+  });
+  assert.deepEqual(calculateAvailableInventoryMeasurementTotals([]), {
+    topGrams: 0,
+    downGrams: 0,
+    pounds: 0,
+    density: null,
+    karat: null,
+  });
 });
 
 test("trade validation accepts pesewa precision and rejects smaller gold weights", () => {

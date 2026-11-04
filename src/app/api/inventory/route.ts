@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/authz";
 import { apiError } from "@/lib/http";
 import { ledgerBalances } from "@/lib/inventory";
+import { calculateAvailableInventoryMeasurementTotals } from "@/lib/dashboard-metrics";
 
 export async function GET() {
   try {
@@ -17,7 +18,7 @@ export async function GET() {
               purityBps: true,
               createdAt: true,
               customer: { select: { name: true } },
-              purchaseMeasurement: { select: { topKg: true, downKg: true } },
+              purchaseMeasurement: { select: { topKg: true, downKg: true, pounds: true, density: true, karat: true } },
             },
           },
           storageLocation: { select: { id: true, name: true } },
@@ -56,10 +57,19 @@ export async function GET() {
     const weightedPurity = grams.isZero()
       ? 0
       : availableLots.reduce((sum, lot) => sum + Number(lot.ledgerBalanceGrams) * lot.purityBps, 0) / Number(grams);
+    const measurementTotals = calculateAvailableInventoryMeasurementTotals(availableLots.map((lot) => ({
+      grams: lot.ledgerBalanceGrams,
+      originalGrams: lot.originalGrams,
+      purityBps: lot.purityBps,
+      pounds: lot.pounds,
+      density: lot.density,
+      measurement: lot.trade?.purchaseMeasurement ?? null,
+    })));
     return Response.json({
       summary: {
         kilograms: grams.div(1000).toNumber(),
         grams: grams.toNumber(),
+        ...measurementTotals,
         costValue: value.toDecimalPlaces(2).toNumber(),
         marketValue: marketValue?.toNumber() ?? null,
         unrealizedGrossMargin: marketValue ? marketValue.minus(value).toDecimalPlaces(2).toNumber() : null,

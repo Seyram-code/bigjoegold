@@ -792,7 +792,7 @@ export function ReportsDashboard() {
           <div className="flex items-start gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#f5e3b0] text-[#795719]"><UserRound size={19} /></span>
             <div><h2 id="report-customer-title" className="text-lg font-semibold text-[#17212f]">{customerModalName}</h2>
-              {customerDetail && <p className="mt-1 text-xs text-[#76808c]">{text(customerDetail.code)} · {customerDetail.kind === "SUPPLIER" ? "Receiving-stock supplier" : "Sales customer"} · {customerDetail.type === "BUSINESS" ? "Business" : "Individual"}</p>}
+              {customerDetail && <p className="mt-1 text-xs text-[#76808c]">{text(customerDetail.code)} · {customerDetail.kind === "SUPPLIER" ? "Customer" : "Supplier"} · {customerDetail.type === "BUSINESS" ? "Business" : "Individual"}</p>}
             </div>
           </div>
           <button type="button" onClick={closeCustomer} aria-label="Close customer details" className="rounded-md p-1.5 text-[#8c95a0] hover:bg-[#f1f3f5]"><X size={17} /></button>

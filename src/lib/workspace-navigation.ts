@@ -33,8 +33,8 @@ export const workspaceNavigation: NavigationItem[] = [
   { label: "Dashboard", href: "/", permission: "dashboard" },
   {
     label: "Customers", href: "/customers", permission: "customers", children: [
-      { label: "Sales Customers", href: "/customers", permission: "customers" },
-      { label: "Receiving Stock Suppliers", href: "/receiving-suppliers", permission: "customers" },
+      { label: "Suppliers", href: "/customers", permission: "customers" },
+      { label: "Customers", href: "/receiving-suppliers", permission: "customers" },
     ],
   },
   { label: "Receive Stock", href: "/receive-stock", permission: "trades" },
@@ -96,8 +96,8 @@ export const workspaceNavigation: NavigationItem[] = [
 ];
 
 const views: WorkspaceView[] = [
-  { href: "/customers", label: "Sales Customers", module: "customers", permission: "customers", customerKind: "BUYER" },
-  { href: "/receiving-suppliers", label: "Receiving Stock Suppliers", module: "customers", permission: "customers", customerKind: "SUPPLIER" },
+  { href: "/customers", label: "Suppliers", module: "customers", permission: "customers", customerKind: "BUYER" },
+  { href: "/receiving-suppliers", label: "Customers", module: "customers", permission: "customers", customerKind: "SUPPLIER" },
   { href: "/receive-stock", label: "Receive Stock", module: "trades", permission: "trades", filter: "purchases", tradeType: "PURCHASE", openForm: true },
   { href: "/sales/all-sales", label: "All Sales", module: "trades", permission: "trades", filter: "sales" },
   { href: "/sales/new-sale", label: "New Sale", module: "trades", permission: "trades", filter: "sales", tradeType: "SALE", openForm: true },
@@ -125,6 +125,7 @@ const views: WorkspaceView[] = [
   { href: "/finance/customer-advances", label: "Supplier Gold Advances", module: "payments", permission: "payments" },
   { href: "/finance/buyer-financing", label: "Customer Gold Financing", module: "payments", permission: "payments" },
   { href: "/manual-momo", label: "Manual Bank & MOMO", module: "payments", permission: "payments" },
+  { href: "/manual-momo/contacts", label: "Manual Bank & MOMO Contacts", module: "payments", permission: "payments" },
   { href: "/finance/accounts", label: "Cash and Bank Accounts", module: "payments", permission: "reports" },
   { href: "/finance/summaries", label: "Financial Summaries", module: "reports", permission: "reports" },
   { href: "/finance/reconciliation", label: "Transaction Reconciliation", module: "payments", permission: "payments" },

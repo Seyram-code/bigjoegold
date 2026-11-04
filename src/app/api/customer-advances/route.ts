@@ -8,6 +8,7 @@ import { recordCustomerAdvance } from "@/lib/customer-advances";
 import { customerAdvanceSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerTransactionEmail } from "@/lib/email";
+import { sendOwnerPaymentSms } from "@/lib/sms";
 
 export async function GET(request: Request) {
   try {
@@ -121,6 +122,7 @@ export async function POST(request: Request) {
         : null;
     if (paymentId) {
       after(async () => {
+        await sendOwnerPaymentSms(paymentId, user.name);
         try {
           const payment = await prisma.payment.findUniqueOrThrow({
             where: { id: paymentId },
