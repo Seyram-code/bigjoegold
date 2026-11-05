@@ -16,7 +16,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { CustomerAutocomplete } from "@/components/ui/customer-autocomplete";
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
-import { calculateMeasuredSaleQuote } from "@/lib/gold";
+import { calculateMeasuredSaleQuote, inferSaleDownWeightFromReceipts } from "@/lib/gold";
 import { formatCurrency, formatPriceAmount, formatTwoDecimalTruncated, formatWeight } from "@/lib/formatters";
 import { DEFAULT_PURCHASE_FORMULA_RULES, type PurchaseFormulaRules } from "@/lib/purchase-formula";
 import { fetchAllCustomers } from "@/lib/customer-client";
@@ -26,7 +26,7 @@ import { useToast } from "@/components/ui/toast-provider";
 type Customer = { id: string; name: string; code: string };
 type CashAccount = { id: string; name: string; type: string; currency: string; isActive: boolean };
 type BoardPrice = { priceType: "RECEIVING" | "SELLING"; priceAmount: string | number; currency: string; priceUnit: string; source: string; effectiveAt: string };
-type Lot = { id: string; batchNumber: string; source?: string; receivedAt: string; status: string; remainingGrams: string | number; purityBps: number; costPerGram: string | number; ledgerBalanceGrams: string | number };
+type Lot = { id: string; batchNumber: string; source?: string; receivedAt: string; status: string; remainingGrams: string | number; purityBps: number; costPerGram: string | number; ledgerBalanceGrams: string | number; trade?: { purchaseMeasurement: { topKg: string | number; downKg: string | number } | null } | null };
 type AdvancePayment = { id: string; reference: string; direction: "INBOUND" | "OUTBOUND"; amount: string | number; referencePricePerGram: string | number | null; referencePriceSource: string | null; referencePriceEffectiveAt: string | null; method: string; paidAt: string; note: string | null; cashAccount: { name: string } | null };
 type Fulfillment = { reference: string; grams: string | number; amount: string | number; pricePerGram: string | number; purityBps: number; createdAt: string; trade: { id: string; reference: string; transactionDate: string }; boardPrice: { source: string; effectiveAt: string } };
 type FulfillAllocation = { lotId: string; grams: string };
@@ -69,6 +69,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const [paidAt, setPaidAt] = useState(localDateTime);
   const [note, setNote] = useState("");
   const [requestedGrams, setRequestedGrams] = useState("");
+  const [requestedGoldUnit, setRequestedGoldUnit] = useState<"g" | "kg">("g");
   const [lotId, setLotId] = useState("");
   const [fulfillmentGrams, setFulfillmentGrams] = useState("");
   const [fulfillmentAllocations, setFulfillmentAllocations] = useState<FulfillAllocation[]>([]);
@@ -214,6 +215,17 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     return measurement.result.total.toFixed(2);
   }, [measurementConfirmed, measurement.result, allocatedFulfillmentDecimal]);
 
+  function updateFulfillmentMeasurements(allocations: FulfillAllocation[]) {
+    const totalGrams = allocations.reduce((sum, allocation) => sum.plus(allocation.grams || 0), new Prisma.Decimal(0));
+    setMeasurementTopGrams(totalGrams.isZero() ? "" : totalGrams.toString());
+    const downGrams = inferSaleDownWeightFromReceipts(
+      allocations,
+      lots.map((lot) => ({ id: lot.id, purchaseMeasurement: lot.trade?.purchaseMeasurement ?? null })),
+    );
+    setMeasurementDownGrams(downGrams ? formatTwoDecimalTruncated(downGrams.toString()) : "");
+    setMeasurementConfirmed(false);
+  }
+
   async function submit(action: AdvanceAction) {
     setError("");
     if (!accountId) {
@@ -231,12 +243,16 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     setBusy(true);
     setPaymentProcessing(true);
     try {
+      const requestedGoldInGrams = requestedGrams && requestedGoldUnit === "kg"
+        ? new Prisma.Decimal(requestedGrams).mul(1000).toString()
+        : requestedGrams;
       const response = await fetch("/api/customer-advances", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
           ...(action === "CREATE_ADVANCE" ? { customerId } : { advanceId: selectedAdvanceId }),
+          ...(action === "CREATE_ADVANCE" && requestedGoldInGrams ? { requestedGrams: requestedGoldInGrams } : {}),
           amount,
           cashAccountId: accountId,
           method,
@@ -254,6 +270,10 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       if (!receiptId) throw new Error("The advance was saved, but its receipt could not be opened. Find the transaction in customer advance history.");
       setAmount("");
       setNote("");
+      setRequestedGrams("");
+      if (action === "CREATE_ADVANCE" && requestedGrams) {
+        showToast("Cash advance and requested gold recorded.");
+      }
       setGeneratingReceipt(true);
       router.push(`/finance/financing/receipt/${encodeURIComponent(receiptId)}`);
     } catch (cause) {
@@ -261,30 +281,6 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     } finally {
       setBusy(false);
       setPaymentProcessing(false);
-    }
-  }
-
-  async function createRequest(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const response = await fetch("/api/customer-advances", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "CREATE_REQUEST", advanceId: selectedAdvanceId, requestedGrams, note }),
-      });
-      const body: unknown = await response.json();
-      if (!response.ok) throw new Error(messageFrom(body, "Unable to create the gold request"));
-      if (body && typeof body === "object" && "id" in body && typeof body.id === "string") setSelectedRequestId(body.id);
-      showToast("Customer gold request recorded. Fulfill it now or as stock becomes available.");
-      setRequestedGrams("");
-      setNote("");
-      await load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to create the gold request");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -382,6 +378,15 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
             {canCreateCustomer && <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => { setError(""); setShowCustomerForm(true); }}><Plus size={14} /> Add new customer</Button>}
           </div>
           <FormField label="Amount received (GHS)" htmlFor="advance-amount"><GhanaAmountInput id="advance-amount" min="0.01" step="0.01" value={amount} onChange={setAmount} className={fieldControlClass} /></FormField>
+          <FormField label="Requested gold" htmlFor="advance-requested-grams" hint="Optional. You can also record a request later." className="sm:col-span-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_8rem] gap-2">
+              <input id="advance-requested-grams" type="number" min={requestedGoldUnit === "kg" ? "0.00000001" : "0.00001"} step={requestedGoldUnit === "kg" ? "0.00000001" : "0.00001"} value={requestedGrams} onChange={(event) => setRequestedGrams(event.target.value)} className={`${fieldControlClass} min-w-0`} />
+              <select aria-label="Requested gold unit" value={requestedGoldUnit} onChange={(event) => setRequestedGoldUnit(event.target.value as "g" | "kg")} className={fieldControlClass}>
+                <option value="g">Grams</option>
+                <option value="kg">KG</option>
+              </select>
+            </div>
+          </FormField>
           <PaymentFields idPrefix="new-advance" accountId={accountId} setAccountId={setAccountId} accounts={accounts} method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} />
           <FormField label="Note / receipt reference" htmlFor="advance-note"><input id="advance-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
           {canWrite && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !customerId || !amount} onClick={() => { void submit("CREATE_ADVANCE"); }}><WalletCards size={15} /> Record advance</Button></div>}
@@ -439,41 +444,36 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Record customer gold request</CardTitle></CardHeader>
-        <CardContent>
-          <form className="grid gap-3 sm:grid-cols-2" onSubmit={createRequest}>
-            <FormField label="Customer advance" htmlFor="request-advance" hint={advances.length ? "Choose the advance belonging to the customer requesting gold." : "No customer advances have been recorded yet. Record a cash advance above first."}><select id="request-advance" required value={selectedAdvanceId} onChange={(event) => setSelectedAdvanceId(event.target.value)} className={fieldControlClass} disabled={!advances.length}><option value="">{advances.length ? "Select an advance" : "No advances recorded yet"}</option>{advances.map((advance) => <option key={advance.id} value={advance.id}>{advance.customer.name} · {currency(advance.balance)}</option>)}</select></FormField>
-            <FormField label="Requested gold (grams)" htmlFor="request-grams"><input id="request-grams" type="number" required min="0.00001" step="0.00001" value={requestedGrams} onChange={(event) => setRequestedGrams(event.target.value)} className={fieldControlClass} /></FormField>
-            <FormField label="Request note" htmlFor="request-note"><input id="request-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
-            {canWrite && <div className="flex items-end"><Button variant="gold" disabled={busy || loading || !selectedAdvanceId}><WalletCards size={15} /> Record gold request</Button></div>}
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader><CardTitle>Fulfill requested gold</CardTitle></CardHeader>
         <CardContent>
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={fulfillRequest}>
             <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {formatWeight(request.remainingGrams, "g", 2)} requested (optional)</option>)}</select></FormField>
-            <FormField label="Available stock batch" htmlFor="fulfill-lot"><StockAutocomplete id="fulfill-lot" required value={lotId} onChange={setLotId} placeholder="Search available batches" lots={lots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
+            <FormField label="Available stock batch" htmlFor="fulfill-lot"><StockAutocomplete id="fulfill-lot" required value={lotId} onChange={(selectedLotId) => {
+              setLotId(selectedLotId);
+              const lot = lots.find((item) => item.id === selectedLotId);
+              setFulfillmentGrams(lot ? String(lot.ledgerBalanceGrams) : "");
+            }} placeholder="Search available batches" lots={lots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
             <div className="flex items-end gap-2">
               <FormField label="Batch grams to release" htmlFor="fulfill-grams" hint={selectedRequest ? `Up to ${formatWeight(selectedRequest.remainingGrams, "g", 2)} requested; you may release less.` : undefined}><input id="fulfill-grams" type="number" min="0.00001" step="0.00001" max={selectedLot ? Number(selectedLot.ledgerBalanceGrams) : undefined} value={fulfillmentGrams} onChange={(event) => setFulfillmentGrams(event.target.value)} className={fieldControlClass} /></FormField>
               <Button type="button" variant="outline" className="mb-0.5 h-10 shrink-0" disabled={!selectedLot || !fulfillmentGrams} onClick={() => {
-                if (!selectedLot || !/^\d+(?:\.\d{1,5})?$/.test(fulfillmentGrams) || Number(fulfillmentGrams) <= 0) return;
-                setFulfillmentAllocations((current) => {
-                  const existing = current.find((allocation) => allocation.lotId === selectedLot.id);
-                  return existing
-                    ? current.map((allocation) => allocation.lotId === selectedLot.id ? { ...allocation, grams: new Prisma.Decimal(allocation.grams).plus(fulfillmentGrams).toFixed(5) } : allocation)
-                    : [...current, { lotId: selectedLot.id, grams: fulfillmentGrams }];
-                });
-                setMeasurementConfirmed(false);
-                setFulfillmentGrams("");
+                  if (!selectedLot || !/^\d+(?:\.\d{1,5})?$/.test(fulfillmentGrams) || Number(fulfillmentGrams) <= 0) return;
+                  const existing = fulfillmentAllocations.find((allocation) => allocation.lotId === selectedLot.id);
+                  const next = existing
+                    ? fulfillmentAllocations.map((allocation) => allocation.lotId === selectedLot.id ? { ...allocation, grams: new Prisma.Decimal(allocation.grams).plus(fulfillmentGrams).toFixed(5) } : allocation)
+                    : [...fulfillmentAllocations, { lotId: selectedLot.id, grams: fulfillmentGrams }];
+                  setFulfillmentAllocations(next);
+                  updateFulfillmentMeasurements(next);
+                  setFulfillmentGrams("");
               }}>Add batch</Button>
             </div>
             {fulfillmentAllocations.length > 0 && <div className="space-y-1 rounded-md border border-[#edf0f3] p-2 text-xs sm:col-span-2">
               {fulfillmentAllocations.map((allocation) => {
                 const lot = lots.find((item) => item.id === allocation.lotId);
-                return <div key={allocation.lotId} className="flex items-center justify-between gap-2"><span>{lot?.batchNumber ?? "Stock batch"} · {formatWeight(allocation.grams, "g", 2)}</span><button type="button" className="text-rose-700 hover:underline" onClick={() => { setFulfillmentAllocations((current) => current.filter((item) => item.lotId !== allocation.lotId)); setMeasurementConfirmed(false); }}>Remove</button></div>;
+                return <div key={allocation.lotId} className="flex items-center justify-between gap-2"><span>{lot?.batchNumber ?? "Stock batch"} · {formatWeight(allocation.grams, "g", 2)}</span><button type="button" className="text-rose-700 hover:underline" onClick={() => {
+                  const next = fulfillmentAllocations.filter((item) => item.lotId !== allocation.lotId);
+                  setFulfillmentAllocations(next);
+                  updateFulfillmentMeasurements(next);
+                }}>Remove</button></div>;
               })}
               <p className="border-t pt-1 font-semibold">Total release: {formatWeight(allocatedFulfillmentGrams, "g", 2)}</p>
             </div>}
@@ -541,8 +541,8 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         <FormField label="Top weight (g)" htmlFor="advance-measurement-top" hint="Must match the total grams allocated from stock batches.">
           <input id="advance-measurement-top" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementTopGrams} onChange={(event) => { setMeasurementTopGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
         </FormField>
-        <FormField label="Down weight (g)" htmlFor="advance-measurement-down">
-          <input id="advance-measurement-down" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementDownGrams} onChange={(event) => { setMeasurementDownGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
+        <FormField label="Down weight (g)" htmlFor="advance-measurement-down" hint="Auto-calculated from receiving measurements of the selected batches; partial batches are scaled. You can adjust it if remeasured.">
+          <input id="advance-measurement-down" type="number" min="0.01" step="0.01" max="999999.99" value={measurementDownGrams} onChange={(event) => { setMeasurementDownGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
         </FormField>
         <FormField label="Pounds (calculated)" htmlFor="advance-measurement-pounds"><input id="advance-measurement-pounds" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.pounds.toString()) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
         <FormField label="Density (calculated)" htmlFor="advance-measurement-density"><input id="advance-measurement-density" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.density.toString()) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>

@@ -265,7 +265,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
       next,
       lots.map((lot) => ({ id: lot.id, purchaseMeasurement: lot.trade?.purchaseMeasurement })),
     );
-    setMeasurementDownGrams(downGrams?.toString() ?? "");
+    setMeasurementDownGrams(downGrams ? formatTwoDecimalTruncated(downGrams.toString()) : "");
     setMeasurementConfirmed(false);
   }
 
@@ -596,7 +596,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
             <input id="sale-measurement-top" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementTopGrams} onChange={(event) => { setMeasurementTopGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
           </FormField>
           <FormField label="Down weight (g)" htmlFor="sale-measurement-down" hint="Auto-filled from the receiving measurements of selected batches; partial batches are scaled. You can adjust it if you remeasure.">
-            <input id="sale-measurement-down" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementDownGrams} onChange={(event) => { setMeasurementDownGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
+            <input id="sale-measurement-down" type="number" min="0.01" step="0.01" max="999999.99" value={measurementDownGrams} onChange={(event) => { setMeasurementDownGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
           </FormField>
           <FormField label="Pounds (calculated)" htmlFor="sale-measurement-pounds"><input id="sale-measurement-pounds" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.pounds.toString()) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
           <FormField label="Density (calculated)" htmlFor="sale-measurement-density"><input id="sale-measurement-density" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.density.toString()) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>

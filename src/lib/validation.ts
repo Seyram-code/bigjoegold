@@ -140,6 +140,7 @@ export const customerAdvanceSchema = z.discriminatedUnion("action", [
     action: z.literal("CREATE_ADVANCE"),
     customerId: z.string().trim().min(1).max(191),
     amount: advanceMoney,
+    requestedGrams: saleGrams.optional(),
     cashAccountId: z.string().trim().min(1).max(191),
     method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
     paidAt: z.string().datetime(),

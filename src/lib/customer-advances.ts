@@ -32,6 +32,36 @@ async function ensureAdvanceLocked(tx: TransactionClient, advanceId: string) {
   return advance;
 }
 
+async function createGoldRequest(
+  tx: TransactionClient,
+  advance: { id: string; reference: string },
+  requestedGrams: string,
+  note: string | undefined,
+  userId: string,
+) {
+  const request = await tx.customerAdvanceRequest.create({
+    data: {
+      reference: reference("ARQ"),
+      advanceId: advance.id,
+      requestedGrams,
+      note: note || null,
+      createdById: userId,
+    },
+  });
+  await addAudit(tx, {
+    userId,
+    action: "customer.advance.gold_requested",
+    entity: "CustomerAdvanceRequest",
+    entityId: request.id,
+    details: {
+      reference: request.reference,
+      advanceReference: advance.reference,
+      requestedGrams: request.requestedGrams.toString(),
+    },
+  });
+  return request;
+}
+
 export async function recordCustomerAdvance(userId: string, input: Exclude<CustomerAdvanceInput, { action: "FULFILL" }>) {
   return prisma.$transaction(async (tx) => {
     const paidAt = "paidAt" in input ? new Date(input.paidAt) : new Date();
@@ -75,6 +105,9 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
         description: `Customer gold advance ${advance.reference}`,
         createdById: userId,
       });
+      if (input.requestedGrams) {
+        await createGoldRequest(tx, advance, input.requestedGrams, undefined, userId);
+      }
       await addAudit(tx, {
         userId,
         action: "customer.advance.created",
@@ -130,23 +163,7 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
     }
 
     const advance = await ensureAdvanceLocked(tx, input.advanceId);
-    const request = await tx.customerAdvanceRequest.create({
-      data: {
-        reference: reference("ARQ"),
-        advanceId: advance.id,
-        requestedGrams: input.requestedGrams,
-        note: input.note || null,
-        createdById: userId,
-      },
-    });
-    await addAudit(tx, {
-      userId,
-      action: "customer.advance.gold_requested",
-      entity: "CustomerAdvanceRequest",
-      entityId: request.id,
-      details: { reference: request.reference, advanceReference: advance.reference, requestedGrams: request.requestedGrams.toString() },
-    });
-    return request;
+    return createGoldRequest(tx, advance, input.requestedGrams, input.note, userId);
   });
 }
 

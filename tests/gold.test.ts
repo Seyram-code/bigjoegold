@@ -306,6 +306,18 @@ test("customer gold advance actions validate payment, request, and stock fulfill
     ...commonPayment,
   }).success, true);
   assert.equal(customerAdvanceSchema.safeParse({
+    action: "CREATE_ADVANCE",
+    customerId: "customer-id",
+    ...commonPayment,
+    requestedGrams: "4000",
+  }).success, true);
+  assert.equal(customerAdvanceSchema.safeParse({
+    action: "CREATE_ADVANCE",
+    customerId: "customer-id",
+    ...commonPayment,
+    requestedGrams: "0",
+  }).success, false);
+  assert.equal(customerAdvanceSchema.safeParse({
     action: "REFUND",
     advanceId: "advance-id",
     ...commonPayment,

@@ -284,7 +284,7 @@ export async function postSale(
       where: { id: created.id },
       include: { customer: { select: { id: true, name: true, code: true } }, payments: true, advanceFulfillment: true, allocations: { include: { lot: { include: { trade: { select: { reference: true } } } } } } },
     });
-  });
+  }, { timeout: 30_000 });
 }
 
 export async function correctSale(
