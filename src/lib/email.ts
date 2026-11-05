@@ -176,6 +176,8 @@ async function deliverMail(
 }
 
 export async function sendOwnerTransactionEmail(notification: OwnerTransactionEmail) {
+  if (process.env.OWNER_TRANSACTION_EMAILS_ENABLED?.trim().toLowerCase() !== "true") return false;
+
   try {
     const config = smtpConfig();
     if (!config) {

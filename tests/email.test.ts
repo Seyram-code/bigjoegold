@@ -1,6 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ownerTransactionEmail } from "../src/lib/email";
+import { ownerTransactionEmail, sendOwnerTransactionEmail } from "../src/lib/email";
+
+test("owner transaction email notifications remain suspended unless explicitly enabled", async (t) => {
+  const previous = process.env.OWNER_TRANSACTION_EMAILS_ENABLED;
+  delete process.env.OWNER_TRANSACTION_EMAILS_ENABLED;
+  t.after(() => {
+    if (previous === undefined) delete process.env.OWNER_TRANSACTION_EMAILS_ENABLED;
+    else process.env.OWNER_TRANSACTION_EMAILS_ENABLED = previous;
+  });
+
+  assert.equal(await sendOwnerTransactionEmail({
+    type: "PAYMENT",
+    reference: "PAY-1002",
+    direction: "INBOUND",
+    amount: "100.00",
+    method: "CASH",
+    recordedBy: "Joe",
+  }), false);
+});
 
 test("purchase owner emails include the purchase summary", () => {
   const message = ownerTransactionEmail({
