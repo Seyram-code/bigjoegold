@@ -171,8 +171,9 @@ export function NotificationsButton() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
-  useAutoRefresh(refresh);
+  useEffect(() => {
+    if (open) void refresh();
+  }, [open, refresh]);
 
   useEffect(() => {
     if (!open) return;

@@ -236,5 +236,8 @@ export async function saveReceiving(
 }
 
 export async function prepareReceivingForSave(userId: string, input: ReceivingInput, existingDraft?: Trade) {
-  return prisma.$transaction(async (tx) => saveReceiving(tx, userId, input, existingDraft));
+  return prisma.$transaction(async (tx) => saveReceiving(tx, userId, input, existingDraft), {
+    maxWait: 10_000,
+    timeout: 30_000,
+  });
 }

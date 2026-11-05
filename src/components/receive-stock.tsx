@@ -232,6 +232,21 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
       setError("");
     }
     try {
+      if (background) {
+        const [recordResponse, priceResponse] = await Promise.all([
+          fetch("/api/receiving", { cache: "no-store" }),
+          fetch("/api/board-prices", { cache: "no-store" }),
+        ]);
+        const [recordBody, priceBody] = await Promise.all([
+          recordResponse.json(),
+          priceResponse.json(),
+        ]);
+        if (!recordResponse.ok) throw new Error(responseMessage(recordBody, "Unable to load receiving records"));
+        if (!priceResponse.ok) throw new Error(responseMessage(priceBody, "Unable to load gold board prices"));
+        setRecords(Array.isArray(recordBody) ? recordBody : []);
+        setPrices(Array.isArray(priceBody) ? priceBody : []);
+        return;
+      }
       const [customerResponse, priceResponse, recordResponse, accountResponse, formulaResponse, financingResponse] = await Promise.all([
         fetch("/api/customers?kind=SUPPLIER&status=ACTIVE&pageSize=50", { cache: "no-store" }),
         fetch("/api/board-prices", { cache: "no-store" }),

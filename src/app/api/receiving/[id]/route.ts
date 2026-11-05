@@ -25,7 +25,7 @@ export async function PATCH(
         throw new HttpError("Only an open purchase draft can be changed or completed", 409);
       }
       return saveReceiving(tx, user.id, input, draft);
-    });
+    }, { maxWait: 10_000, timeout: 30_000 });
     return Response.json(trade);
   } catch (error) {
     return apiError(error);
