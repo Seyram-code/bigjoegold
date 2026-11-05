@@ -205,7 +205,14 @@ test("purchase formula settings validate positive divisors and explicit confirma
   assert.equal(purchaseFormulaSettingsSchema.safeParse({ ...valid, ownerConfirmed: "true" }).success, false);
 });
 
-test("readJson accepts same-origin requests and rejects cross-origin mutations", async () => {
+test("readJson accepts same-origin requests and rejects cross-origin mutations", async (t) => {
+  const previousAuthUrl = process.env.BETTER_AUTH_URL;
+  process.env.BETTER_AUTH_URL = "http://127.0.0.1:3001";
+  t.after(() => {
+    if (previousAuthUrl === undefined) delete process.env.BETTER_AUTH_URL;
+    else process.env.BETTER_AUTH_URL = previousAuthUrl;
+  });
+
   const sameOrigin = new Request("http://127.0.0.1:3001/api/settings/purchase-formula", {
     method: "PUT",
     headers: {

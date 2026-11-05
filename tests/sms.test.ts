@@ -95,3 +95,34 @@ test("Wigal SMS request follows the documented per-destination payload", async (
   });
   assert.equal(typeof (requestBody?.destinations as Array<{ msgid: unknown }>)[0].msgid, "string");
 });
+
+test("Wigal SMS sends to each configured phone number once", async (t) => {
+  const env = {
+    WIGAL_FROG_API_KEY: "test-api-secret",
+    WIGAL_FROG_USERNAME: "test-user",
+    WIGAL_FROG_SENDER_ID: "BJGOLD",
+    WIGAL_FROG_OWNER_PHONE: " +233200000000, +233200000001, +233200000000 ",
+  };
+  const previous = Object.fromEntries(
+    Object.keys(env).map((key) => [key, process.env[key]]),
+  );
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  Object.assign(process.env, env);
+
+  let requestBody: Record<string, unknown> | undefined;
+  t.mock.method(globalThis, "fetch", async (_input: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ status: "ACCEPTD" }), { status: 200 });
+  });
+
+  assert.equal(await sendOwnerSms("BJG test message"), true);
+  const destinations = requestBody?.destinations as Array<{ destination: string; message: string; msgid: string; smstype: string }>;
+  assert.deepEqual(destinations.map(({ destination }) => destination), ["+233200000000", "+233200000001"]);
+  assert.ok(destinations.every((entry) => entry.message === "BJG test message" && entry.smstype === "text"));
+  assert.equal(new Set(destinations.map(({ msgid }) => msgid)).size, 2);
+});

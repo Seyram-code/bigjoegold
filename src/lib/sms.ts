@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 const FROG_SEND_URL = "https://frogapi.wigal.com.gh/api/v3/sms/send";
 const REQUEST_TIMEOUT_MS = 10_000;
 
-type FrogConfig = { apiKey: string; username: string; senderId: string; ownerPhone: string };
+type FrogConfig = { apiKey: string; username: string; senderId: string; ownerPhones: string[] };
 type PurchaseSms = { reference: string; supplierName: string; quantityKg: string | number; totalAmount: string | number; amountPaid: string | number; recordedBy: string };
 type SaleSms = { reference: string; customerName?: string | null; quantityKg: string | number; totalAmount: string | number; amountPaid: string | number; recordedBy: string };
 type PaymentSms = { reference: string; direction: "INBOUND" | "OUTBOUND"; amount: string | number; method: string; customerName?: string | null; tradeReference?: string | null; recordedBy: string };
@@ -15,8 +15,8 @@ function frogConfig(): FrogConfig | null {
   const apiKey = required(process.env.WIGAL_FROG_API_KEY);
   const username = required(process.env.WIGAL_FROG_USERNAME);
   const senderId = required(process.env.WIGAL_FROG_SENDER_ID);
-  const ownerPhone = required(process.env.WIGAL_FROG_OWNER_PHONE);
-  const values = [apiKey, username, senderId, ownerPhone];
+  const ownerPhones = [...new Set(required(process.env.WIGAL_FROG_OWNER_PHONE).split(",").map((phone) => phone.trim()).filter(Boolean))];
+  const values = [apiKey, username, senderId, ownerPhones.length > 0 ? "configured" : ""];
   if (values.every((value) => !value)) {
     console.warn("Owner SMS is disabled because the Wigal FROG configuration is missing.");
     return null;
@@ -25,7 +25,7 @@ function frogConfig(): FrogConfig | null {
     console.warn("Owner SMS is disabled because the Wigal FROG configuration is incomplete.");
     return null;
   }
-  return { apiKey, username, senderId, ownerPhone };
+  return { apiKey, username, senderId, ownerPhones };
 }
 
 function compact(value: string) { return value.replace(/\s+/g, " ").trim(); }
@@ -37,7 +37,7 @@ function rejectionDetails(body: unknown, config: FrogConfig) {
   const safeValue = (value: unknown) => {
     if (typeof value !== "string" && typeof value !== "number") return undefined;
     let result = String(value).replace(/\s+/g, " ").trim();
-    for (const secret of [config.apiKey, config.username, config.senderId, config.ownerPhone]) {
+    for (const secret of [config.apiKey, config.username, config.senderId, ...config.ownerPhones]) {
       if (secret.length >= 4) result = result.replaceAll(secret, "[redacted]");
     }
     return result.slice(0, 240);
@@ -108,12 +108,12 @@ export async function sendOwnerSms(message: string) {
       headers: { "Content-Type": "application/json", "API-KEY": config.apiKey, USERNAME: config.username },
       body: JSON.stringify({
         senderid: config.senderId,
-        destinations: [{
-          destination: config.ownerPhone,
+        destinations: config.ownerPhones.map((destination) => ({
+          destination,
           message,
           msgid: crypto.randomUUID(),
           smstype: "text",
-        }],
+        })),
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
