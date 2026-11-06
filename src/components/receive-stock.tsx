@@ -499,7 +499,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
             </div>
           </FormField>
           <FormField label="Transaction date" htmlFor="receiving-date">
-            <CalendarPicker id="receiving-date" includeTime value={values.transactionDate} onChange={(transactionDate) => updateField("transactionDate", transactionDate)} />
+            <CalendarPicker id="receiving-date" includeTime max={localDateTime()} value={values.transactionDate} onChange={(transactionDate) => updateField("transactionDate", transactionDate)} />
           </FormField>
           {selectedCustomer && <div className="rounded-lg border border-[#e4e9ee] bg-[#fbfcfd] p-2.5 sm:col-span-2">
             <p className="text-[10px] font-semibold text-[#273342]">{selectedCustomer.name}</p>

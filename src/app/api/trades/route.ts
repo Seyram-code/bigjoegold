@@ -59,6 +59,7 @@ export async function POST(request: Request) {
 
     const trade = await prisma.$transaction(async (tx) => {
       let costBasis = new Prisma.Decimal(0);
+      const transactionDate = new Date(input.transactionDate);
       const created = await tx.trade.create({
         data: {
           reference: reference(input.type === "PURCHASE" ? "PUR" : "SAL"),
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
           purityBps: input.purityBps,
           pricePerGram: input.pricePerGram,
           totalAmount: total,
+          transactionDate,
           note: input.note || null,
           createdById: user.id,
         },
@@ -165,6 +167,7 @@ export async function POST(request: Request) {
             cashAccountId: input.cashAccountId || null,
             tradeId: created.id,
             customerId: input.customerId || null,
+            paidAt: transactionDate,
             createdById: user.id,
           },
         });

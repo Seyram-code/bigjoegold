@@ -29,11 +29,15 @@ import { permissions, type Permission } from "@/lib/permissions";
 
 export type ModuleKey = Exclude<WorkspaceView["module"], "settings">;
 type Row = Record<string, unknown>;
-type Field = { name: string; label: string; type?: "text" | "email" | "number" | "select" | "textarea" | "date" | "password" | "tel"; options?: { value: string; label: string }[]; placeholder?: string; step?: string; full?: boolean; hint?: string };
+type Field = { name: string; label: string; type?: "text" | "email" | "number" | "select" | "textarea" | "date" | "datetime-local" | "password" | "tel"; options?: { value: string; label: string }[]; placeholder?: string; step?: string; full?: boolean; hint?: string };
 type FormSpec = { title: string; endpoint: string; schema: ZodType; fields: Field[] };
 
 const currency = formatCurrency;
 const formatDate = (value: unknown) => value ? new Date(String(value)).toLocaleString("en-GH", { dateStyle: "medium", timeStyle: "short" }) : "—";
+const localDateTime = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
 const hours = ["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"].map((value) => ({ value, label: value.replaceAll("_", " ") }));
 const customerTypeOptions = [{ value: "INDIVIDUAL", label: "Individual" }, { value: "BUSINESS", label: "Business" }];
 const staffRoles = ["OWNER", "MANAGER", "GOLD_RECEIVER", "SALES_OFFICER", "INVENTORY_OFFICER", "TRADER", "ACCOUNTANT", "AUDITOR", "VIEWER"];
@@ -100,6 +104,7 @@ const formSpecs: Partial<Record<ModuleKey, FormSpec>> = {
     schema: tradeSchema,
     fields: [
       { name: "type", label: "Trade direction", type: "select", options: [{ value: "PURCHASE", label: "Purchase gold" }, { value: "SALE", label: "Sell gold" }] },
+      { name: "transactionDate", label: "Trade date and time", type: "datetime-local" },
       { name: "customerId", label: "Customer", type: "select", options: [] },
       { name: "quantityKg", label: "Gross weight (kg)", type: "number", step: "0.000001", placeholder: "0.000000" },
       { name: "purityBps", label: "Purity (basis points)", type: "number", step: "1", placeholder: "9999", hint: "99.99% purity = 9999 basis points." },
@@ -120,6 +125,7 @@ const formSpecs: Partial<Record<ModuleKey, FormSpec>> = {
       { name: "amount", label: "Amount (GHS)", type: "number", step: "0.01", placeholder: "0.00" },
       { name: "cashAccountId", label: "Cash / bank account", type: "select", options: [] },
       { name: "method", label: "Payment method", type: "select", options: hours },
+      { name: "paidAt", label: "Payment date and time", type: "datetime-local" },
       { name: "note", label: "Reference or note", type: "textarea", full: true },
     ],
   },
@@ -148,8 +154,8 @@ const columns: Partial<Record<ModuleKey, { label: string; key: string }[]>> = {
 
 const defaultValues: Partial<Record<ModuleKey, Record<string, string>>> = {
   customers: { name: "", kind: "BUYER", type: "INDIVIDUAL", phone: "", email: "", tin: "", address: "", notes: "" },
-  trades: { type: "PURCHASE", customerId: "", quantityKg: "", purityBps: "9999", pricePerGram: "", initialPayment: "0", cashAccountId: "", method: "CASH", note: "" },
-  payments: { tradeId: "", direction: "INBOUND", amount: "", cashAccountId: "", method: "CASH", note: "" },
+  trades: { type: "PURCHASE", transactionDate: localDateTime(), customerId: "", quantityKg: "", purityBps: "9999", pricePerGram: "", initialPayment: "0", cashAccountId: "", method: "CASH", note: "" },
+  payments: { tradeId: "", direction: "INBOUND", amount: "", cashAccountId: "", method: "CASH", paidAt: localDateTime(), note: "" },
   staff: { name: "", phone: "", role: "TRADER" },
 };
 
@@ -265,6 +271,10 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
     form.clearErrors();
     try {
       const payload: Record<string, unknown> = { ...values };
+      for (const dateField of ["transactionDate", "paidAt"]) {
+        const value = payload[dateField];
+        if (typeof value === "string" && value) payload[dateField] = new Date(value).toISOString();
+      }
       const validated = spec?.schema.parse(payload);
       const response = await fetch(editing ? `${spec?.endpoint}/${String(editing.id)}` : spec?.endpoint ?? "", {
         method: editing ? "PATCH" : "POST",
@@ -508,7 +518,7 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
               placeholder="Search customer or choose walk-in"
             /> :
               field.type === "select" ? <select id={fieldId} {...form.register(field.name)} className={fieldControlClass}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> :
-              <input id={fieldId} type={field.type ?? "text"} step={field.step} placeholder={field.placeholder} {...form.register(field.name)} className={fieldControlClass} />}
+              <input id={fieldId} type={field.type ?? "text"} step={field.step} max={field.type === "datetime-local" ? localDateTime() : undefined} placeholder={field.placeholder} {...form.register(field.name)} className={fieldControlClass} />}
         </FormField>;
       })}
       {module === "trades" && <p className="text-[10px] leading-4 text-[#89929e] sm:col-span-2 xl:col-span-3">Price is in Ghana cedis per gram of pure gold. Quantity is gross physical weight in kilograms. Sales are rejected if available FIFO stock is insufficient.</p>}

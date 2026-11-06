@@ -939,8 +939,10 @@ test("available inventory measurements scale batch weights and weight density an
 });
 
 test("trade validation accepts pesewa precision and rejects smaller gold weights", () => {
+  const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const valid = tradeSchema.safeParse({
     type: "PURCHASE",
+    transactionDate: pastDate,
     quantityKg: "0.000001",
     purityBps: "9999",
     pricePerGram: "99.90",
@@ -952,12 +954,46 @@ test("trade validation accepts pesewa precision and rejects smaller gold weights
 
   const invalid = tradeSchema.safeParse({
     type: "PURCHASE",
+    transactionDate: pastDate,
     quantityKg: "0.0000001",
     purityBps: "9999",
     pricePerGram: "99.90",
     method: "CASH",
   });
   assert.equal(invalid.success, false);
+});
+
+test("user-entered transaction dates accept backdating and reject future dates", () => {
+  const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const saleInput = {
+    customerId: "buyer-id",
+    transactionDate: pastDate,
+    quantityKg: "0.75",
+    purityBps: 9000,
+    pricePerGram: "120.50",
+    discountAmount: "25.75",
+    initialPayment: "0",
+    topGrams: "750",
+    downGrams: "40",
+    allocations: [{ lotId: "lot-id", grams: "750" }],
+  };
+  assert.equal(saleSchema.safeParse(saleInput).success, true);
+  assert.equal(saleSchema.safeParse({ ...saleInput, transactionDate: futureDate }).success, false);
+  assert.equal(tradeSchema.safeParse({
+    type: "PURCHASE",
+    transactionDate: pastDate,
+    quantityKg: "0.1",
+    purityBps: 9000,
+    pricePerGram: "100",
+  }).success, true);
+  assert.equal(tradeSchema.safeParse({
+    type: "PURCHASE",
+    transactionDate: futureDate,
+    quantityKg: "0.1",
+    purityBps: 9000,
+    pricePerGram: "100",
+  }).success, false);
 });
 
 test("board price validation requires currency, unit, and an explicit current-price confirmation", () => {

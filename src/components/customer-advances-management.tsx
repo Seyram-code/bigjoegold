@@ -492,7 +492,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
             </div>
             <FormField label="Gold purity (karat)" htmlFor="fulfill-purity" hint="Calculated from the gold measurements"><input id="fulfill-purity" type="number" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.karat.toString()) : ""} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
             <FormField label="Current board price (GHS / pure g)" htmlFor="fulfill-price" hint={boardPrice ? `${boardPrice.source} · ${formatDate(boardPrice.effectiveAt)}` : "No compatible published price"}><input id="fulfill-price" readOnly value={boardPrice ? String(boardPrice.priceAmount) : ""} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
-            <FormField label="Release date" htmlFor="fulfill-date"><CalendarPicker id="fulfill-date" includeTime required value={transactionDate} onChange={setTransactionDate} /></FormField>
+            <FormField label="Release date" htmlFor="fulfill-date"><CalendarPicker id="fulfill-date" includeTime max={localDateTime()} required value={transactionDate} onChange={setTransactionDate} /></FormField>
             <FormField label="Gold value at current rate (GHS)" htmlFor="fulfill-value"><input id="fulfill-value" readOnly value={fulfillmentQuote ? currency(fulfillmentQuote) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
             <FormField label="Fulfillment note" htmlFor="fulfill-note"><input id="fulfill-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
             {canFulfill && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !selectedRequest || !fulfillmentAllocations.length || !boardPrice || !fulfillmentQuote}><WalletCards size={15} /> Release gold and deduct advance</Button></div>}
@@ -576,6 +576,6 @@ function PaymentFields({
   return <>
     <FormField label="Cash / bank account" htmlFor={`${idPrefix}-account`}><select id={`${idPrefix}-account`} required value={accountId} onChange={(event) => setAccountId(event.target.value)} className={fieldControlClass}><option value="">Select a GHS account</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.type.replaceAll("_", " ")}</option>)}</select></FormField>
     <FormField label="Payment method" htmlFor={`${idPrefix}-method`}><select id={`${idPrefix}-method`} value={method} onChange={(event) => setMethod(event.target.value as (typeof paymentMethods)[number])} className={fieldControlClass}>{paymentMethods.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></FormField>
-    <FormField label="Payment date" htmlFor={`${idPrefix}-paid-at`}><CalendarPicker id={`${idPrefix}-paid-at`} includeTime required value={paidAt} onChange={setPaidAt} /></FormField>
+    <FormField label="Payment date" htmlFor={`${idPrefix}-paid-at`}><CalendarPicker id={`${idPrefix}-paid-at`} includeTime max={localDateTime()} required value={paidAt} onChange={setPaidAt} /></FormField>
   </>;
 }

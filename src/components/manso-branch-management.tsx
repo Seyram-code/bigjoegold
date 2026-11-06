@@ -227,7 +227,7 @@ export function MansoBranchManagement({
                 <input id="manso-funds-amount" type="text" inputMode="decimal" required value={formatAmountInput(fundsForm.amount)} onChange={(event) => handleAmountInput(event, (amount) => setFundsForm((current) => ({ ...current, amount })))} className={fieldControlClass} />
               </FormField>
               <FormField label="Date" htmlFor="manso-funds-date">
-                <input id="manso-funds-date" type="datetime-local" required value={fundsForm.movementDate} onChange={(event) => setFundsForm({ ...fundsForm, movementDate: event.target.value })} className={fieldControlClass} />
+                <input id="manso-funds-date" type="datetime-local" max={localDateTime()} required value={fundsForm.movementDate} onChange={(event) => setFundsForm({ ...fundsForm, movementDate: event.target.value })} className={fieldControlClass} />
               </FormField>
               <FormField label="Reason / reference" htmlFor="manso-funds-description" className="sm:col-span-2">
                 <input id="manso-funds-description" required minLength={3} maxLength={500} value={fundsForm.description} onChange={(event) => setFundsForm({ ...fundsForm, description: event.target.value })} className={fieldControlClass} placeholder={fundsAction === "ADVANCE" ? "e.g. Weekly buying funds" : "e.g. Unused balance returned"} />
@@ -279,7 +279,7 @@ export function MansoBranchManagement({
                 <input id="manso-actual-cost" type="text" inputMode="decimal" required value={formatAmountInput(goldForm.actualCost)} onChange={(event) => handleAmountInput(event, (actualCost) => setGoldForm((current) => ({ ...current, actualCost })))} className={fieldControlClass} />
               </FormField>
               <FormField label="Date received" htmlFor="manso-gold-date">
-                <input id="manso-gold-date" type="datetime-local" required value={goldForm.transactionDate} onChange={(event) => setGoldForm({ ...goldForm, transactionDate: event.target.value })} className={fieldControlClass} />
+                <input id="manso-gold-date" type="datetime-local" max={localDateTime()} required value={goldForm.transactionDate} onChange={(event) => setGoldForm({ ...goldForm, transactionDate: event.target.value })} className={fieldControlClass} />
               </FormField>
               <FormField label="Batch number (optional)" htmlFor="manso-batch-number">
                 <input id="manso-batch-number" maxLength={120} value={goldForm.batchNumber} onChange={(event) => setGoldForm({ ...goldForm, batchNumber: event.target.value })} className={fieldControlClass} placeholder="Auto-generate if blank" />
@@ -309,7 +309,7 @@ export function MansoBranchManagement({
                 <input id="manso-expense-amount" type="text" inputMode="decimal" required value={formatAmountInput(expenseForm.amount)} onChange={(event) => handleAmountInput(event, (amount) => setExpenseForm((current) => ({ ...current, amount })))} className={fieldControlClass} />
               </FormField>
               <FormField label="Date" htmlFor="manso-expense-date">
-                <input id="manso-expense-date" type="datetime-local" required value={expenseForm.movementDate} onChange={(event) => setExpenseForm({ ...expenseForm, movementDate: event.target.value })} className={fieldControlClass} />
+                <input id="manso-expense-date" type="datetime-local" max={localDateTime()} required value={expenseForm.movementDate} onChange={(event) => setExpenseForm({ ...expenseForm, movementDate: event.target.value })} className={fieldControlClass} />
               </FormField>
               <FormField label="Expense details" htmlFor="manso-expense-description" className="sm:col-span-2">
                 <input id="manso-expense-description" required minLength={3} maxLength={500} value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} className={fieldControlClass} placeholder="Describe the branch expense and keep its receipt" />

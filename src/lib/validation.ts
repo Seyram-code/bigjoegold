@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const positiveAmount = z.coerce.number().finite().positive().multipleOf(0.01);
 const optionalText = z.string().trim().max(500).optional().or(z.literal(""));
+const pastOrPresentDateTime = (label: string) => z.string().datetime()
+  .refine((value) => new Date(value).getTime() <= Date.now(), `${label} cannot be in the future`);
 
 export const customerSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -41,7 +43,7 @@ export const manualMomoEntrySchema = z.object({
   customerPhone: optionalText,
   amount: manualMomoMoney.refine((value) => Number(value) > 0, "Amount must be greater than zero"),
   transactionReference: z.string().trim().max(191).optional().or(z.literal("")),
-  transactionDate: z.string().datetime(),
+  transactionDate: pastOrPresentDateTime("Payment date"),
   note: optionalText,
 }).strict();
 
@@ -60,7 +62,7 @@ export const manualMomoContactImportRowSchema = manualMomoContactSchema.extend({
 export const manualMomoAccountSchema = z.object({
   accountId: z.string().trim().min(1).max(191),
   openingBalance: manualMomoMoney.refine((value) => Number(value) >= 0, "Opening balance cannot be negative"),
-  openingDate: z.string().datetime(),
+  openingDate: pastOrPresentDateTime("Opening date"),
 }).strict();
 
 export const manualMomoAccountCreateSchema = z.object({
@@ -69,11 +71,12 @@ export const manualMomoAccountCreateSchema = z.object({
   bankNameTelco: z.string().trim().min(2, "Enter a bank or telco name").max(120),
   accountNumber: z.string().trim().min(1).max(120),
   openingBalance: manualMomoMoney.refine((value) => Number(value) >= 0, "Opening balance cannot be negative"),
-  openingDate: z.string().datetime(),
+  openingDate: pastOrPresentDateTime("Opening date"),
 }).strict();
 
 export const tradeSchema = z.object({
   type: z.enum(["PURCHASE", "SALE"]),
+  transactionDate: pastOrPresentDateTime("Trade date"),
   customerId: z.string().trim().optional().or(z.literal("")),
   quantityKg: z.coerce.number().finite().min(0.000001).max(100000),
   purityBps: z.coerce.number().int().min(1).max(10000),
@@ -105,7 +108,7 @@ const saleMoney = z.string().trim()
 
 export const saleSchema = z.object({
   customerId: z.string().trim().max(191).optional().or(z.literal("")),
-  transactionDate: z.string().datetime(),
+  transactionDate: pastOrPresentDateTime("Sale date"),
   quantityKg: saleWeightKg,
   purityBps: z.coerce.number().int().min(1).max(10000),
   pricePerGram: salePrice,
@@ -143,7 +146,7 @@ export const customerAdvanceSchema = z.discriminatedUnion("action", [
     requestedGrams: saleGrams.optional(),
     cashAccountId: z.string().trim().min(1).max(191),
     method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
-    paidAt: z.string().datetime(),
+    paidAt: pastOrPresentDateTime("Advance payment date"),
     note: optionalText,
   }).strict(),
   z.object({
@@ -152,7 +155,7 @@ export const customerAdvanceSchema = z.discriminatedUnion("action", [
     amount: advanceMoney,
     cashAccountId: z.string().trim().min(1).max(191),
     method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
-    paidAt: z.string().datetime(),
+    paidAt: pastOrPresentDateTime("Advance payment date"),
     note: optionalText,
   }).strict(),
   z.object({
@@ -161,7 +164,7 @@ export const customerAdvanceSchema = z.discriminatedUnion("action", [
     amount: advanceMoney,
     cashAccountId: z.string().trim().min(1).max(191),
     method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
-    paidAt: z.string().datetime(),
+    paidAt: pastOrPresentDateTime("Advance payment date"),
     note: z.string().trim().min(5).max(500),
   }).strict(),
   z.object({
@@ -173,7 +176,7 @@ export const customerAdvanceSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("FULFILL"),
     requestId: z.string().trim().min(1).max(191),
-    transactionDate: z.string().datetime(),
+    transactionDate: pastOrPresentDateTime("Fulfillment date"),
     purityBps: z.coerce.number().int().min(1).max(10000),
     pricePerGram: salePrice,
     topGrams: saleMeasurementGrams,
@@ -194,7 +197,7 @@ export const buyerFinanceSchema = z.discriminatedUnion("action", [
     amount: advanceMoney,
     cashAccountId: z.string().trim().min(1).max(191),
     method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
-    paidAt: z.string().datetime(),
+    paidAt: pastOrPresentDateTime("Advance payment date"),
     note: optionalText,
   }).strict(),
   z.object({
@@ -203,7 +206,7 @@ export const buyerFinanceSchema = z.discriminatedUnion("action", [
     amount: advanceMoney,
     cashAccountId: z.string().trim().min(1).max(191),
     method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
-    paidAt: z.string().datetime(),
+    paidAt: pastOrPresentDateTime("Advance payment date"),
     note: optionalText,
   }).strict(),
 ]);
@@ -241,7 +244,7 @@ export const inventoryMovementSchema = z.discriminatedUnion("action", [
     action: z.literal("OPENING"),
     batchNumber: z.string().trim().max(120).optional().or(z.literal("")),
     source: z.string().trim().min(2).max(160),
-    receivedAt: z.string().datetime(),
+    receivedAt: pastOrPresentDateTime("Received date"),
     quantityKg: inventoryKg,
     pounds: z.string().trim().regex(/^\d{1,9}(?:\.\d{1,8})?$/).optional().or(z.literal("")),
     density: z.string().trim().regex(/^\d{1,12}(?:\.\d{1,8})?$/).optional().or(z.literal("")),
@@ -284,7 +287,7 @@ const receivingPayment = z.string().trim()
 export const receivingSchema = z.object({
   action: z.enum(["DRAFT", "COMPLETE"]),
   customerId: z.string().trim().min(1).max(191),
-  transactionDate: z.string().datetime(),
+  transactionDate: pastOrPresentDateTime("Purchase date"),
   topGrams: receivingWeightGrams,
   downGrams: receivingWeightGrams,
   boardPriceId: z.string().trim().min(1).max(191),
@@ -318,7 +321,7 @@ export const paymentSchema = z.object({
   direction: z.enum(["INBOUND", "OUTBOUND"]),
   amount: positiveAmount.max(100000000000),
   method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
-  paidAt: z.string().datetime().optional(),
+  paidAt: pastOrPresentDateTime("Payment date").optional(),
   note: optionalText,
 }).strict().refine((data) => Boolean(data.tradeId), {
   message: "Select a trade to allocate this payment to",
@@ -332,7 +335,7 @@ export const financeAccountSchema = z.object({
   institution: z.string().trim().max(120).optional().or(z.literal("")),
   accountReference: z.string().trim().max(120).optional().or(z.literal("")),
   openingBalance: z.string().trim().regex(/^\d{1,14}(?:\.\d{1,2})?$/).default("0"),
-  openingDate: z.string().datetime(),
+  openingDate: pastOrPresentDateTime("Opening date"),
 }).strict();
 
 export const financeMovementSchema = z.discriminatedUnion("action", [
@@ -342,7 +345,7 @@ export const financeMovementSchema = z.discriminatedUnion("action", [
     toAccountId: z.string().trim().min(1).max(191),
     amount: z.string().trim().regex(/^\d{1,14}(?:\.\d{1,2})?$/)
       .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0),
-    movementDate: z.string().datetime(),
+    movementDate: pastOrPresentDateTime("Movement date"),
     description: z.string().trim().min(5).max(500),
   }).strict(),
   z.object({
@@ -351,7 +354,7 @@ export const financeMovementSchema = z.discriminatedUnion("action", [
     direction: z.enum(["INBOUND", "OUTBOUND"]),
     amount: z.string().trim().regex(/^\d{1,14}(?:\.\d{1,2})?$/)
       .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0),
-    movementDate: z.string().datetime(),
+    movementDate: pastOrPresentDateTime("Movement date"),
     description: z.string().trim().min(5).max(500),
   }).strict(),
 ]);
@@ -368,14 +371,14 @@ export const mansoBranchActionSchema = z.discriminatedUnion("action", [
     action: z.literal("ADVANCE"),
     cashAccountId: z.string().trim().min(1).max(191),
     amount: mansoMoney,
-    movementDate: z.string().datetime(),
+    movementDate: pastOrPresentDateTime("Movement date"),
     description: z.string().trim().min(3).max(500),
   }).strict(),
   z.object({
     action: z.literal("RETURN"),
     cashAccountId: z.string().trim().min(1).max(191),
     amount: mansoMoney,
-    movementDate: z.string().datetime(),
+    movementDate: pastOrPresentDateTime("Movement date"),
     description: z.string().trim().min(3).max(500),
   }).strict(),
   z.object({
@@ -383,14 +386,14 @@ export const mansoBranchActionSchema = z.discriminatedUnion("action", [
     topGrams: mansoGrams,
     downGrams: mansoGrams,
     actualCost: mansoMoney,
-    transactionDate: z.string().datetime(),
+    transactionDate: pastOrPresentDateTime("Purchase date"),
     batchNumber: z.string().trim().max(120).optional().or(z.literal("")),
     note: optionalText,
   }).strict(),
   z.object({
     action: z.literal("EXPENSE"),
     amount: mansoMoney,
-    movementDate: z.string().datetime(),
+    movementDate: pastOrPresentDateTime("Expense date"),
     description: z.string().trim().min(3).max(500),
   }).strict(),
 ]);
