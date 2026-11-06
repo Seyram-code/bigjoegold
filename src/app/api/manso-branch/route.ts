@@ -151,12 +151,12 @@ export async function POST(request: Request) {
 
         const source = input.action === "ADVANCE" ? selectedAccount : branchAccount;
         const destination = input.action === "ADVANCE" ? branchAccount : selectedAccount;
-        const balance = await branchBalance(tx, source.id, source.id === branchAccount.id);
         const amount = new Prisma.Decimal(input.amount);
-        if (amount.greaterThan(balance)) {
-          throw new HttpError(input.action === "ADVANCE"
-            ? "The advance exceeds the available company account balance"
-            : "The returned amount exceeds Manso's available funds", 409);
+        if (input.action === "RETURN") {
+          const balance = await branchBalance(tx, branchAccount.id, true);
+          if (amount.greaterThan(balance)) {
+            throw new HttpError("The returned amount exceeds Manso's available funds", 409);
+          }
         }
         const group = reference("TRF");
         const movementDate = new Date(input.movementDate);
