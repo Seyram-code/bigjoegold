@@ -4,6 +4,14 @@ export type ManualMomoStatementAccount = {
   balanceBeforePeriod: number;
 };
 
+export type ManualMomoAccountSummary = ManualMomoStatementAccount & {
+  id: string;
+  name: string;
+  type: "BANK" | "MOBILE_MONEY";
+  bankNameTelco: string;
+  accountNumber: string | null;
+};
+
 export type ManualMomoStatementEntry = {
   reference: string;
   direction: "INBOUND" | "OUTBOUND";
@@ -13,6 +21,10 @@ export type ManualMomoStatementEntry = {
   transactionReference: string | null;
   transactionDate: string;
   note: string | null;
+};
+
+export type ManualMomoAccountSummaryEntry = ManualMomoStatementEntry & {
+  accountId: string;
 };
 
 export type ManualMomoStatementRow = {
@@ -25,6 +37,45 @@ export type ManualMomoStatementRow = {
   balance: number;
   note: string;
 };
+
+export function buildManualMomoAccountSummaries(
+  accounts: ManualMomoAccountSummary[],
+  entries: ManualMomoAccountSummaryEntry[],
+  from: string,
+  to: string,
+) {
+  const rangeStart = new Date(`${from}T00:00:00.000Z`).getTime();
+  const rangeEnd = new Date(`${to}T23:59:59.999Z`).getTime();
+  return accounts.map((account) => {
+    const statement = buildManualMomoStatement(
+      account,
+      entries.filter((entry) => entry.accountId === account.id),
+      from,
+      to,
+    );
+    const openingRow = new Date(account.openingDate).getTime() < rangeStart
+      && new Date(account.openingDate).getTime() <= rangeEnd
+      ? [{
+        date: `${from}T00:00:00.000Z`,
+        reference: "OPENING BALANCE",
+        direction: "OPENING BALANCE",
+        customer: "—",
+        phone: "—",
+        amount: statement.opening,
+        balance: statement.opening,
+        note: "Balance brought forward",
+      }]
+      : [];
+    return {
+      account,
+      opening: statement.opening,
+      received: statement.received,
+      paid: statement.paid,
+      closing: statement.closing,
+      rows: [...openingRow, ...statement.rows],
+    };
+  });
+}
 
 function cents(value: number) {
   return Math.round(value * 100);

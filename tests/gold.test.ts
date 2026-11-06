@@ -16,7 +16,8 @@ import { ledgerBalances, movementBalance } from "../src/lib/inventory";
 import { createBatchCode } from "../src/lib/records";
 import { calculateCashBalances } from "../src/lib/finance";
 import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
-import { buildManualMomoStatement } from "../src/lib/manual-momo";
+import { buildManualMomoAccountSummaries, buildManualMomoStatement } from "../src/lib/manual-momo";
+import { buildDailyBuyerFinancingSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "../src/lib/reporting";
 import { customerAdvanceSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
 
 test("generated batch codes are eight uppercase alphanumeric characters", () => {
@@ -29,6 +30,25 @@ test("trade value uses pure grams and truncates to pesewas", () => {
   assert.equal(grossGrams.toString(), "1000");
   assert.equal(total.toFixed(2), "4999500.00");
   assert.equal(calculateTradeAmount(0.001, 10000, 1.239).total.toString(), "1.23");
+});
+
+test("profit reports use FIFO cost for full and partial sales", () => {
+  const purchase = calculatePurchaseMeasurements("455", "24", "11166");
+  const fullSale = calculateMeasuredSaleQuote("455", "24", "12333");
+  const fullProfit = calculateProfitMetrics(fullSale.total.toFixed(2), purchase.amount.toFixed(2));
+  assert.equal(purchase.amount.toFixed(2), "665703.32");
+  assert.equal(fullSale.total.toFixed(2), "735278.44");
+  assert.equal(fullProfit.profit, 69575.12);
+  assert.ok(Math.abs((fullProfit.grossMargin ?? 0) - 0.094624) < 0.000001);
+  assert.ok(Math.abs((fullProfit.returnOnCost ?? 0) - 0.104514) < 0.000001);
+
+  const partialSale = calculateMeasuredSaleQuote("200", "10.54945", "12333");
+  const allocatedReceivingCost = purchase.amount.div("455").toDecimalPlaces(6).mul("200").toDecimalPlaces(2);
+  const partialProfit = calculateProfitMetrics(partialSale.total.toFixed(2), allocatedReceivingCost.toFixed(2));
+  assert.equal(allocatedReceivingCost.toFixed(2), "292616.84");
+  assert.equal(partialSale.total.toFixed(2), "323171.78");
+  assert.equal(partialProfit.profit, 30554.94);
+  assert.ok(Math.abs((partialProfit.returnOnCost ?? 0) - 0.104420) < 0.000001);
 });
 
 test("advance gold fulfillment uses the current price for the released grams", () => {
@@ -694,6 +714,105 @@ test("finance validation covers account metadata, movements, and optional approv
     assert.equal(nextPeriod.closing, 589.85);
     assert.equal(nextPeriod.rows.length, 1);
   });
+
+  test("manual Bank and MOMO close summaries calculate each ledger independently", () => {
+    const accounts = [
+      { id: "momo", name: "MTN Wallet", type: "MOBILE_MONEY" as const, bankNameTelco: "MTN", accountNumber: "0240000000", openingBalance: 250, openingDate: "2026-10-01T00:00:00.000Z", balanceBeforePeriod: 300 },
+      { id: "bank", name: "Main Bank", type: "BANK" as const, bankNameTelco: "Bank", accountNumber: "123456", openingBalance: 1000, openingDate: "2026-10-01T00:00:00.000Z", balanceBeforePeriod: 1200 },
+    ];
+    const summaries = buildManualMomoAccountSummaries(accounts, [
+      {
+        accountId: "momo",
+        reference: "MM-1",
+        direction: "INBOUND",
+        amount: 80.25,
+        customerName: "Ama",
+        customerPhone: null,
+        transactionReference: null,
+        transactionDate: "2026-11-05T10:00:00.000Z",
+        note: null,
+      },
+      {
+        accountId: "momo",
+        reference: "MM-2",
+        direction: "OUTBOUND",
+        amount: 20,
+        customerName: "Kojo",
+        customerPhone: null,
+        transactionReference: null,
+        transactionDate: "2026-11-05T12:00:00.000Z",
+        note: null,
+      },
+      {
+        accountId: "bank",
+        reference: "MM-3",
+        direction: "INBOUND",
+        amount: 50,
+        customerName: "Ama",
+        customerPhone: null,
+        transactionReference: null,
+        transactionDate: "2026-11-05T10:00:00.000Z",
+        note: null,
+      },
+    ], "2026-11-05", "2026-11-05");
+
+    assert.deepEqual(summaries.map(({ opening, received, paid, closing }) => ({ opening, received, paid, closing })), [
+      { opening: 300, received: 80.25, paid: 20, closing: 360.25 },
+      { opening: 1200, received: 50, paid: 0, closing: 1250 },
+    ]);
+    assert.deepEqual(summaries.map(({ account, rows }) => ({
+      name: account.name,
+      transactionReferences: rows.map(({ reference }) => reference),
+    })), [
+      { name: "MTN Wallet", transactionReferences: ["OPENING BALANCE", "MM-1", "MM-2"] },
+      { name: "Main Bank", transactionReferences: ["OPENING BALANCE", "MM-3"] },
+    ]);
+  });
+});
+
+test("daily customer gold financing summaries include prior balance and daily stock applied", () => {
+  const rows = buildDailyBuyerFinancingSummary([{
+    customerId: "buyer-1",
+    customer: "Ama",
+    payments: [
+      { amount: 100, direction: "OUTBOUND", paidAt: "2026-10-31T12:00:00.000Z" },
+      { amount: 50, direction: "OUTBOUND", paidAt: "2026-11-01T10:00:00.000Z" },
+      { amount: 5, direction: "INBOUND", paidAt: "2026-11-01T11:00:00.000Z" },
+    ],
+    settlements: [
+      { amount: 20, createdAt: "2026-10-31T13:00:00.000Z", quantityKg: 0.01 },
+      { amount: 25, createdAt: "2026-11-01T12:00:00.000Z", quantityKg: 0.02 },
+      { amount: 30, createdAt: "2026-11-02T12:00:00.000Z", quantityKg: 0.03 },
+    ],
+  }], "2026-11-01", "2026-11-02");
+
+  assert.deepEqual(rows, [
+    { date: "2026-11-01", customer: "Ama", stockKg: 0.02, financing: 50, balance: 100 },
+    { date: "2026-11-02", customer: "Ama", stockKg: 0.03, financing: 0, balance: 70 },
+  ]);
+});
+
+test("daily supplier purchase summaries show receipts, sales value, and running payables", () => {
+  const rows = buildDailySupplierPurchaseSummary([
+    {
+      transactionDate: "2026-10-30T12:00:00.000Z",
+      quantityKg: 0.1,
+      totalAmount: 100,
+      payments: [{ amount: 20, direction: "OUTBOUND", paidAt: "2026-10-31T12:00:00.000Z" }],
+      settlements: [],
+    },
+    {
+      transactionDate: "2026-11-02T09:00:00.000Z",
+      quantityKg: 0.2,
+      totalAmount: 200,
+      payments: [{ amount: 100, direction: "OUTBOUND", paidAt: "2026-11-02T10:00:00.000Z" }],
+      settlements: [{ amount: 20, createdAt: "2026-11-02T11:00:00.000Z" }],
+    },
+  ], "2026-11-01", "2026-11-02");
+
+  assert.deepEqual(rows, [
+    { date: "2026-11-02", stockKg: 0.2, sales: 200, balance: 160 },
+  ]);
 });
 
 test("dashboard received measurements and current inventory karat are weighted by grams", () => {

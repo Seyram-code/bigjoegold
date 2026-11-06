@@ -49,6 +49,8 @@ type ReportData = {
     purchases: number;
     costOfSales: number;
     profit: number | null;
+    grossMargin: number | null;
+    returnOnCost: number | null;
     cashIn: number;
     cashOut: number;
     netCashFlow: number;
@@ -70,12 +72,14 @@ type ReportData = {
   boardPrices: ReportRow[] | null;
   financing: ReportRow[] | null;
   financingAccounts: ReportRow[] | null;
+  supplierDailySummary: ReportRow[] | null;
+  buyerFinancingDailySummary: ReportRow[] | null;
 };
 
 type Column = {
   key: string;
   label: string;
-  format?: "currency" | "kg" | "grams" | "date" | "percent";
+  format?: "currency" | "kg" | "grams" | "date" | "day" | "percent";
 };
 type TabId = "overview" | "trading" | "inventory" | "customers" | "customer-advances" | "buyer-financing" | "payments" | "payment-methods" | "cash-flow" | "movements" | "staff" | "board";
 
@@ -116,6 +120,7 @@ function displayValue(value: unknown, format?: Column["format"]) {
   if (format === "kg") return weight(value);
   if (format === "grams") return grams(value);
   if (format === "date") return date(value);
+  if (format === "day") return new Date(String(value)).toLocaleDateString("en-GH", { dateStyle: "medium", timeZone: "UTC" });
   if (format === "percent") return `${formatDecimalTruncated(Number(value) * 100, 2)}%`;
   return text(value);
 }
@@ -166,6 +171,8 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
         ["Sales value (GHS)", data.totals.sales],
         ["Purchase value (GHS)", data.totals.purchases],
         ["Profit (GHS)", data.totals.profit],
+        ["Gross margin (% of sales)", data.totals.grossMargin === null ? null : data.totals.grossMargin * 100],
+        ["Return on cost (% of cost)", data.totals.returnOnCost === null ? null : data.totals.returnOnCost * 100],
         ["Cash received (GHS)", data.totals.cashIn],
         ["Cash paid (GHS)", data.totals.cashOut],
         ["Net cash flow (GHS)", data.totals.netCashFlow],
@@ -176,7 +183,7 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
       ],
     },
     { name: "Purchase and sales", rows: [Object.keys(groupedTrades[0] ?? { period: "", purchasesKg: 0, purchaseValue: 0, salesKg: 0, salesValue: 0 }), ...groupedTrades.map((row) => Object.values(row))] },
-    { name: "Trade transactions", rows: [Object.keys(data.trades[0] ?? { reference: "", type: "", transactionDate: "", customer: "", quantityKg: 0, karat: 0, netAmount: 0, paidAmount: 0, balance: 0, createdBy: "" }), ...data.trades.map((row) => Object.values(row))] },
+    { name: "Trade transactions", rows: [Object.keys(data.trades[0] ?? { reference: "", type: "", transactionDate: "", customer: "", quantityKg: 0, karat: 0, netAmount: 0, profit: null, grossMargin: null, returnOnCost: null, paidAmount: 0, balance: 0, createdBy: "" }), ...data.trades.map((row) => Object.values(row))] },
   ];
   if (data.inventory) sheets.push({ name: "Current stock", rows: [Object.keys(data.inventory[0] ?? { batchNumber: "", remainingKg: 0, karat: 0, bookValue: 0, location: "" }), ...data.inventory.map((row) => Object.values(row))] });
   const optional: Array<[string, ReportRow[] | null]> = [
@@ -226,7 +233,30 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
       sheets.push({ name: sheetName, rows: [headers, ...rows.map((row) => headers.map((header) => row[header] ?? null))] });
     }
   }
+  if (data.supplierDailySummary) sheets.push({
+    name: "Supplier daily summary",
+    rows: [
+      ["Date", "Stock received (kg)", "Sales / purchase value (GHS)", "Balance due (GHS)"],
+      ...data.supplierDailySummary.map((row) => [row.date, row.stockKg, row.sales, row.balance]),
+    ],
+  });
+  if (data.buyerFinancingDailySummary) sheets.push({
+    name: "Customer financing daily",
+    rows: [
+      ["Date", "Customer", "Stock (kg)", "Financing (GHS)", "Balance (GHS)"],
+      ...data.buyerFinancingDailySummary.map((row) => [row.date, row.customer, row.stockKg, row.financing, row.balance]),
+    ],
+  });
   return sheets;
+}
+
+function printFinancingSummary() {
+  const clearPrintTarget = () => {
+    delete document.body.dataset.printTarget;
+  };
+  document.body.dataset.printTarget = "financing-summary";
+  window.addEventListener("afterprint", clearPrintTarget, { once: true });
+  window.print();
 }
 
 export function ReportsDashboard() {
@@ -469,6 +499,9 @@ export function ReportsDashboard() {
     { key: "quantityKg", label: "Weight", format: "kg" },
     { key: "karat", label: "Karat" },
     { key: "netAmount", label: "Value", format: "currency" },
+    { key: "profit", label: "Profit", format: "currency" },
+    { key: "grossMargin", label: "Gross margin (% of sale)", format: "percent" },
+    { key: "returnOnCost", label: "Return on cost (%)", format: "percent" },
     { key: "paidAmount", label: "Paid", format: "currency" },
     { key: "balance", label: "Balance", format: "currency" },
     { key: "createdBy", label: "Recorded by" },
@@ -510,6 +543,8 @@ export function ReportsDashboard() {
     ["Purchase value", currency(data.totals.purchases)],
     ["Sales value", currency(data.totals.sales)],
     ["Profit", data.totals.profit === null ? "Unavailable" : currency(data.totals.profit)],
+    ["Gross margin (% of sale)", data.totals.grossMargin === null ? "Unavailable" : `${formatDecimalTruncated(data.totals.grossMargin * 100, 2)}%`],
+    ["Return on cost", data.totals.returnOnCost === null ? "Unavailable" : `${formatDecimalTruncated(data.totals.returnOnCost * 100, 2)}%`],
     ["Inventory valuation", data.totals.inventoryValue === null ? "Restricted" : currency(data.totals.inventoryValue)],
     ["Current stock", data.totals.inventoryKg === null ? "Restricted" : weight(data.totals.inventoryKg)],
     ["Net cash flow", currency(data.totals.netCashFlow)],
@@ -574,7 +609,44 @@ export function ReportsDashboard() {
       { key: "balanceMeaning", label: "Balance interpretation" },
       { key: "statement", label: "Statement" },
     );
+    const dailySupplierColumns = makeColumns(
+      { key: "date", label: "Date", format: "day" },
+      { key: "stockKg", label: "Stock received", format: "kg" },
+      { key: "sales", label: "Sales / purchase value", format: "currency" },
+      { key: "balance", label: "Balance due", format: "currency" },
+    );
+    const dailyBuyerFinancingColumns = makeColumns(
+      { key: "date", label: "Date", format: "day" },
+      { key: "customer", label: "Customer" },
+      { key: "stockKg", label: "Stock", format: "kg" },
+      { key: "financing", label: "Financing", format: "currency" },
+      { key: "balance", label: "Balance", format: "currency" },
+    );
     reportContent = <>
+      <Card className="financing-summary-print-root">
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <div className="min-w-0 flex-1 text-left">
+            <CardTitle>{customerAdvances ? "Daily supplier stock and balance" : "Daily customer gold financing summary"}</CardTitle>
+            <p className="text-xs text-[#7c8793]">{customerAdvances
+              ? "Supplier purchases within the selected period, with total outstanding purchase balances as of each date."
+              : "Gold received against buyer financing, cash financing advanced, and the running amount owed as of each date."}</p>
+          </div>
+          <Button type="button" variant="outline" size="sm" className="report-controls shrink-0" onClick={printFinancingSummary}>
+            <Printer size={14} /> Print summary
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-2 px-4 pb-4">
+          <div className="hidden print:block">
+            <h3 className="text-lg font-semibold">Big Joe Gold — {customerAdvances ? "Daily Supplier Gold Advances Summary" : "Daily Customer Gold Financing Summary"}</h3>
+            <p className="text-xs">Period: {new Date(data.period.from).toLocaleDateString("en-GH")} to {new Date(data.period.to).toLocaleDateString("en-GH")}</p>
+          </div>
+          <ReportTable
+            rows={customerAdvances ? data.supplierDailySummary ?? [] : data.buyerFinancingDailySummary ?? []}
+            columns={customerAdvances ? dailySupplierColumns : dailyBuyerFinancingColumns}
+            emptyMessage={`No ${customerAdvances ? "supplier purchase" : "customer financing"} activity in this date range.`}
+          />
+        </CardContent>
+      </Card>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {customerAdvances ? <>
           <Metric label="Advance funds received" value={currency(total("Funds received"))} />

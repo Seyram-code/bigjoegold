@@ -5,6 +5,7 @@ import { formatPriceAmount } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { apiError, HttpError } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import { buildDailyBuyerFinancingSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "@/lib/reporting";
 
 const zero = () => new Prisma.Decimal(0);
 
@@ -179,10 +180,12 @@ export async function GET(request: Request) {
             reference: true,
             type: true,
             totalAmount: true,
+            quantityKg: true,
+            transactionDate: true,
             customer: { select: { name: true } },
-            payments: { select: { amount: true, direction: true } },
+            payments: { select: { amount: true, direction: true, paidAt: true } },
             advanceFulfillment: { select: { amount: true } },
-            buyerFinanceSettlement: { select: { amount: true } },
+            buyerFinanceSettlement: { select: { amount: true, createdAt: true } },
             corrections: { select: { creditAmount: true, refundAmount: true } },
           },
         })
@@ -267,8 +270,8 @@ export async function GET(request: Request) {
             id: true,
             reference: true,
             customer: { select: { id: true, name: true } },
-            payments: { select: { amount: true, direction: true } },
-            settlements: { select: { amount: true } },
+            payments: { select: { amount: true, direction: true, paidAt: true } },
+            settlements: { select: { amount: true, createdAt: true, trade: { select: { quantityKg: true } } } },
           },
         })
         : Promise.resolve(null),
@@ -358,6 +361,40 @@ export async function GET(request: Request) {
         };
       }),
     ].sort((left, right) => left.customer.localeCompare(right.customer)) : null;
+    const buyerFinancingDailySummary = readPayments
+      ? buildDailyBuyerFinancingSummary((buyerFinanceAccounts ?? []).map((account) => ({
+        customerId: account.customer.id,
+        customer: readCustomerDetails ? account.customer.name : "Restricted customer",
+        payments: account.payments.map((payment) => ({
+          amount: payment.amount.toNumber(),
+          direction: payment.direction,
+          paidAt: payment.paidAt.toISOString(),
+        })),
+        settlements: account.settlements.map((settlement) => ({
+          amount: settlement.amount.toNumber(),
+          createdAt: settlement.createdAt.toISOString(),
+          quantityKg: settlement.trade.quantityKg.toNumber(),
+        })),
+      })), from.toISOString().slice(0, 10), to.toISOString().slice(0, 10))
+      : null;
+    const supplierDailySummary = readPayments
+      ? buildDailySupplierPurchaseSummary((allOpenTrades ?? [])
+        .filter((trade) => trade.type === "PURCHASE")
+        .map((trade) => ({
+          transactionDate: trade.transactionDate.toISOString(),
+          quantityKg: trade.quantityKg.toNumber(),
+          totalAmount: trade.totalAmount.toNumber(),
+          payments: trade.payments.map((payment) => ({
+            amount: payment.amount.toNumber(),
+            direction: payment.direction,
+            paidAt: payment.paidAt.toISOString(),
+          })),
+          settlements: trade.buyerFinanceSettlement ? [{
+            amount: trade.buyerFinanceSettlement.amount.toNumber(),
+            createdAt: trade.buyerFinanceSettlement.createdAt.toISOString(),
+          }] : [],
+        })), from.toISOString().slice(0, 10), to.toISOString().slice(0, 10))
+      : null;
 
     const tradeRows = trades.map((trade) => {
       const credits = trade.corrections.reduce((sum, correction) => sum.plus(correction.creditAmount), zero());
@@ -369,6 +406,13 @@ export async function GET(request: Request) {
         ? trade.advanceFulfillment?.amount ?? 0
         : trade.buyerFinanceSettlement?.amount ?? 0);
       const adjustedAmount = Prisma.Decimal.max(zero(), new Prisma.Decimal(trade.totalAmount).minus(credits));
+      const returnedCost = trade.corrections.reduce((correctionSum, correction) =>
+        correctionSum.plus(correction.allocations.reduce((allocationSum, allocation) =>
+          allocationSum.plus(new Prisma.Decimal(allocation.grams).mul(allocation.lot.costPerGram)), zero())), zero());
+      const costAfterReturns = Prisma.Decimal.max(zero(), new Prisma.Decimal(trade.costBasis).minus(returnedCost));
+      const profitMetrics = trade.type === "SALE" && new Prisma.Decimal(trade.costBasis).greaterThan(0)
+        ? calculateProfitMetrics(adjustedAmount.toFixed(2), costAfterReturns.toFixed(2))
+        : null;
       const balance = trade.type === "SALE"
         ? Prisma.Decimal.max(zero(), adjustedAmount.minus(totalPaid).plus(
           trade.corrections.reduce((sum, correction) => sum.plus(correction.refundAmount), zero()),
@@ -386,6 +430,9 @@ export async function GET(request: Request) {
         totalAmount: trade.totalAmount.toNumber(),
         netAmount: adjustedAmount.toNumber(),
         costBasis: trade.costBasis.toNumber(),
+        profit: profitMetrics ? adjustedAmount.minus(costAfterReturns).toNumber() : null,
+        grossMargin: profitMetrics?.grossMargin ?? null,
+        returnOnCost: profitMetrics?.returnOnCost ?? null,
         paidAmount: totalPaid.toNumber(),
         balance: balance.toNumber(),
         customerId: readCustomerDetails ? trade.customer?.id ?? null : null,
@@ -411,6 +458,7 @@ export async function GET(request: Request) {
     const cashIn = sumAmounts(inbound);
     const cashOut = sumAmounts(outbound);
     const costBasisComplete = sales.every((trade) => new Prisma.Decimal(trade.costBasis).greaterThan(0));
+    const overallProfitMetrics = calculateProfitMetrics(salesValue.toFixed(2), costOfSales.toFixed(2));
     const profit = costBasisComplete ? salesValue.minus(costOfSales).toNumber() : null;
 
     const inventoryRows = inventoryLots?.map((lot) => ({
@@ -485,6 +533,8 @@ export async function GET(request: Request) {
         purchases: purchaseValue.toNumber(),
         costOfSales: costOfSales.toNumber(),
         profit,
+        grossMargin: costBasisComplete ? overallProfitMetrics.grossMargin : null,
+        returnOnCost: costBasisComplete ? overallProfitMetrics.returnOnCost : null,
         cashIn: cashIn.toNumber(),
         cashOut: cashOut.toNumber(),
         netCashFlow: cashIn.minus(cashOut).toNumber(),
@@ -496,10 +546,10 @@ export async function GET(request: Request) {
       },
       profitAvailability: {
         costBasisComplete,
-        method: "Net sales value minus the recorded cost of gold sold or released.",
+        method: "Profit is net sales value minus the FIFO receiving cost of gold sold or released. Gross margin is profit divided by sales value; return on cost is profit divided by receiving cost.",
         explanation: profit === null
           ? "Profit is unavailable because a cost basis is missing for one or more sales."
-          : "Profit reflects the margin on gold sold or released; unsold stock is not counted as profit.",
+          : "Profit is recognized only for gold sold or released. Partial sales use the receiving cost of the grams allocated from each stock batch; unsold gold remains inventory.",
       },
       trades: tradeRows,
       inventory: inventoryRows,
@@ -561,6 +611,8 @@ export async function GET(request: Request) {
       })) ?? null,
       financing: financingRows,
       financingAccounts,
+      supplierDailySummary,
+      buyerFinancingDailySummary,
     });
   } catch (error) {
     return apiError(error);

@@ -299,6 +299,7 @@ input[type="number"]::-webkit-outer-spin-button {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
 @media print {
+  @page manual-momo { size: landscape; }
   body { background: #fff !important; }
   html[data-theme="dark"] .print-page,
   html[data-theme="dark"] .statement-print-root,
@@ -336,11 +337,19 @@ input[type="number"]::-webkit-outer-spin-button {
   body:has(.account-statement-print-root) .account-statement-print-root,
   body:has(.account-statement-print-root) .account-statement-print-root * { visibility: visible !important; }
   .account-statement-print-root { position: absolute !important; inset: 0 !important; width: 100% !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; }
+  body[data-print-target="financing-summary"] * { visibility: hidden !important; }
+  body[data-print-target="financing-summary"] .report-print-area,
+  body[data-print-target="financing-summary"] .report-print-area * { visibility: hidden !important; }
+  body[data-print-target="financing-summary"] .financing-summary-print-root,
+  body[data-print-target="financing-summary"] .financing-summary-print-root * { visibility: visible !important; }
+  .financing-summary-print-root { position: fixed !important; inset: 0 !important; width: 100% !important; height: max-content !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; }
   body:has(.manual-momo-print-root) * { visibility: hidden !important; }
   body:has(.manual-momo-print-root) .manual-momo-print-root,
   body:has(.manual-momo-print-root) .manual-momo-print-root * { visibility: visible !important; }
-  .manual-momo-print-root { position: fixed !important; inset: 0 !important; width: 100% !important; height: max-content !important; min-height: 0 !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; }
+  .manual-momo-print-root { page: manual-momo; position: fixed !important; inset: 0 !important; width: 100% !important; height: max-content !important; min-height: 0 !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; }
   .manual-momo-controls { display: none !important; }
+  .manual-momo-transaction-toggle { display: none !important; }
+  .manual-momo-all-transactions[hidden] { display: block !important; }
   .manual-momo-screen-title { display: none !important; }
   .manual-momo-print-root table { min-width: 0 !important; width: 100% !important; table-layout: fixed !important; font-size: 8pt !important; }
   .manual-momo-print-root th, .manual-momo-print-root td { white-space: normal !important; overflow-wrap: anywhere !important; padding: 5px !important; }
@@ -352,5 +361,36 @@ input[type="number"]::-webkit-outer-spin-button {
   .manual-momo-print-root th:nth-child(6), .manual-momo-print-root td:nth-child(6) { width: 11% !important; }
   .manual-momo-print-root th:nth-child(7), .manual-momo-print-root td:nth-child(7) { width: 11% !important; }
   .manual-momo-print-root th:nth-child(8), .manual-momo-print-root td:nth-child(8) { width: 12% !important; }
+  .manual-momo-print-root .manual-momo-account-summary-table th:nth-child(1),
+  .manual-momo-print-root .manual-momo-account-summary-table td:nth-child(1) { width: 15% !important; }
+  .manual-momo-print-root .manual-momo-account-summary-table th:nth-child(2),
+  .manual-momo-print-root .manual-momo-account-summary-table td:nth-child(2) { width: 10% !important; }
+  .manual-momo-print-root .manual-momo-account-summary-table th:nth-child(3),
+  .manual-momo-print-root .manual-momo-account-summary-table td:nth-child(3) { width: 12% !important; }
+  .manual-momo-print-root .manual-momo-account-summary-table th:nth-child(4),
+  .manual-momo-print-root .manual-momo-account-summary-table td:nth-child(4) { width: 11% !important; }
+  .manual-momo-print-root .manual-momo-account-summary-table th:nth-child(n+5),
+  .manual-momo-print-root .manual-momo-account-summary-table td:nth-child(n+5) { width: 10.4% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table { font-size: 7pt !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(1),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(1) { width: 11% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(2),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(2) { width: 8% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(3),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(3) { width: 8% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(4),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(4) { width: 12% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(5),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(5) { width: 9% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(6),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(6) { width: 12% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(7),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(7) { width: 9% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(8),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(8) { width: 9% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(9),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(9) { width: 9% !important; }
+  .manual-momo-print-root .manual-momo-transactions-table th:nth-child(10),
+  .manual-momo-print-root .manual-momo-transactions-table td:nth-child(10) { width: 13% !important; }
   .manual-momo-print-root tr { break-inside: avoid; }
 }

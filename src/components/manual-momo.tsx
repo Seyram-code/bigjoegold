@@ -9,7 +9,7 @@ import { CalendarPicker } from "@/components/ui/calendar-picker";
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { useToast } from "@/components/ui/toast-provider";
 import { formatCurrency } from "@/lib/formatters";
-import { buildManualMomoStatement, type ManualMomoStatementEntry } from "@/lib/manual-momo";
+import { buildManualMomoAccountSummaries, type ManualMomoStatementEntry } from "@/lib/manual-momo";
 
 type Direction = "INBOUND" | "OUTBOUND";
 type AccountType = "BANK" | "MOBILE_MONEY";
@@ -32,7 +32,6 @@ type LedgerData = { accounts: Account[]; entries: Entry[] };
 type Contact = { id: string; name: string; phone: string | null };
 
 const today = new Date().toISOString().slice(0, 10);
-const firstOfMonth = `${today.slice(0, 7)}-01`;
 const fieldLabelClass = "mb-1.5 block text-xs font-medium text-[#576170]";
 const dateInputClass = "h-10 w-full rounded-lg border border-[#dfe4e9] bg-white px-3 text-sm text-[#17212f]";
 
@@ -50,8 +49,9 @@ async function responseError(response: Response) {
 }
 
 export function ManualMomo({ canWrite }: { canWrite: boolean }) {
-  const [accountId, setAccountId] = useState("");
-  const [from, setFrom] = useState(firstOfMonth);
+  const [statementAccountId, setStatementAccountId] = useState("ALL");
+  const [showAllTransactions, setShowAllTransactions] = useState(false);
+  const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
   const [data, setData] = useState<LedgerData | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -97,7 +97,6 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       ]);
       setData(result);
       setContacts(contactResult);
-      setAccountId((current) => result.accounts.some((account) => account.id === current) ? current : result.accounts[0]?.id ?? "");
       setEntryForm((current) => ({
         ...current,
         accountId: result.accounts.some((account) => account.id === current.accountId)
@@ -117,16 +116,51 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const selectedAccount = data?.accounts.find((account) => account.id === accountId);
-  const statement = useMemo(() => {
-    if (!data || !selectedAccount) return { rows: [], opening: 0, received: 0, paid: 0, closing: 0 };
-    return buildManualMomoStatement(
-      selectedAccount,
-      data.entries.filter((entry) => entry.accountId === accountId),
-      from,
-      to,
-    );
-  }, [accountId, data, from, selectedAccount, to]);
+  const accountSummaries = useMemo(
+    () => data ? buildManualMomoAccountSummaries(data.accounts, data.entries, from, to) : [],
+    [data, from, to],
+  );
+  const visibleAccountSummaries = useMemo(
+    () => statementAccountId === "ALL"
+      ? accountSummaries
+      : accountSummaries.filter(({ account }) => account.id === statementAccountId),
+    [accountSummaries, statementAccountId],
+  );
+  const allAccountRows = useMemo(
+    () => accountSummaries.flatMap(({ account, rows }) => rows.map((row, index) => ({
+      ...row,
+      accountId: account.id,
+      accountName: account.name,
+      accountType: account.type,
+      rowKey: `${account.id}-${index}`,
+    }))).sort((left, right) => left.date.localeCompare(right.date) || left.accountName.localeCompare(right.accountName)),
+    [accountSummaries],
+  );
+  const visibleAccountRows = useMemo(
+    () => statementAccountId === "ALL"
+      ? allAccountRows
+      : allAccountRows.filter((row) => row.accountId === statementAccountId),
+    [allAccountRows, statementAccountId],
+  );
+  const selectedStatementAccount = data?.accounts.find((account) => account.id === statementAccountId);
+  const accountSummaryRows = visibleAccountSummaries.map(({ account, opening, received, paid, closing }) => (
+    <tr key={account.id} className="border-b border-[#edf0f3]">
+      <td className="px-2 py-2.5 font-medium">{account.name}</td><td className="px-2 py-2.5">{account.type === "BANK" ? "Bank" : "Mobile Money"}</td><td className="px-2 py-2.5">{account.bankNameTelco}</td><td className="px-2 py-2.5">{account.accountNumber || "—"}</td>
+      <td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(opening)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(received)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(paid)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right font-semibold">{formatCurrency(closing)}</td>
+    </tr>
+  ));
+  const accountTransactionRows = visibleAccountRows.map((row) => (
+    <tr key={row.rowKey} className={`border-b border-[#edf0f3]${row.direction === "OPENING BALANCE" ? " font-semibold" : ""}`}>
+      <td className="px-2 py-2.5 font-semibold">{row.accountName}</td><td className="px-2 py-2.5">{row.accountType === "BANK" ? "Bank" : "Mobile Money"}</td>
+      <td className="whitespace-nowrap px-2 py-2.5">{displayDate(row.date)}</td><td className="px-2 py-2.5">{row.reference}</td>
+      <td className="whitespace-nowrap px-2 py-2.5">{row.direction === "RECEIVED" ? <span className="inline-flex items-center gap-1 text-emerald-700"><ArrowDownLeft size={13} /> Received</span> : row.direction === "PAID" ? <span className="inline-flex items-center gap-1 text-rose-700"><ArrowUpRight size={13} /> Paid</span> : row.direction}</td>
+      <td className="px-2 py-2.5">{row.customer}</td><td className="px-2 py-2.5">{row.phone}</td>
+      <td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(row.amount)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(row.balance)}</td><td className="px-2 py-2.5">{row.note}</td>
+    </tr>
+  ));
+  const emptyTransactionRow = !visibleAccountRows.length && (
+    <tr><td colSpan={10} className="px-2 py-8 text-center text-sm text-[#7c8793]">{visibleAccountSummaries.length ? "No manual payments recorded during this period." : "Create a ledger to start a statement."}</td></tr>
+  );
 
   async function submitEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -193,7 +227,6 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       });
       if (!response.ok) throw new Error(await responseError(response));
       const account = await response.json() as Account;
-      setAccountId(account.id);
       setEntryForm((current) => ({ ...current, accountId: account.id }));
       setNewAccountForm({ type: "BANK", name: "", bankNameTelco: "", accountNumber: "", openingBalance: "" });
       showToast(`${account.name} ledger created.`);
@@ -276,54 +309,70 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       </CardContent>
     </Card>}
 
-    {selectedAccount && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric label="Opening balance" value={formatCurrency(statement.opening)} />
-      <Metric label="Money received" value={formatCurrency(statement.received)} />
-      <Metric label="Money paid" value={formatCurrency(statement.paid)} />
-      <Metric label="Closing balance" value={formatCurrency(statement.closing)} />
-    </div>}
-
-    <Card className="manual-momo-print-root">
+    <div className="manual-momo-print-root">
+    <Card>
       <CardHeader className="flex flex-wrap items-end justify-between gap-3">
         <div className="manual-momo-screen-title">
-          <CardTitle>{selectedAccount?.name ?? "Manual Bank & MOMO"} statement</CardTitle>
-          <p className="mt-1 text-xs text-[#7c8793]">Manual customer payments from {displayDate(`${from}T00:00:00.000Z`)} to {displayDate(`${to}T00:00:00.000Z`)}</p>
+          <CardTitle>{selectedStatementAccount ? `${selectedStatementAccount.name} statement` : "Daily account close summary"}</CardTitle>
+          <p className="mt-1 text-xs text-[#7c8793]">{selectedStatementAccount ? "Transactions and running balance for this account" : "Opening balances, payments received and made, and closing balances for all accounts"} from {from === to ? displayDate(`${from}T00:00:00.000Z`) : `${displayDate(`${from}T00:00:00.000Z`)} to ${displayDate(`${to}T00:00:00.000Z`)}`}.</p>
         </div>
         <div className="manual-momo-controls flex flex-wrap items-end gap-2">
-          <label><span className={fieldLabelClass}>Account</span><select value={accountId} onChange={(event) => setAccountId(event.target.value)} className={dateInputClass} disabled={!data?.accounts.length}>
+          <label><span className={fieldLabelClass}>Account</span><select value={statementAccountId} onChange={(event) => {
+            setStatementAccountId(event.target.value);
+            if (event.target.value === "ALL") setShowAllTransactions(false);
+          }} className={dateInputClass} disabled={!data?.accounts.length}>
+            <option value="ALL">All accounts</option>
             {data?.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select></label>
           <label><span className={fieldLabelClass}>From</span><CalendarPicker id="manual-momo-statement-from" value={from} max={to} onChange={setFrom} /></label>
           <label><span className={fieldLabelClass}>To</span><CalendarPicker id="manual-momo-statement-to" value={to} min={from} max={today} onChange={setTo} /></label>
-          <Button type="button" variant="gold" onClick={() => window.print()} disabled={loading || !selectedAccount}><Printer size={15} /> Print / Save PDF</Button>
+          <Button type="button" variant="gold" onClick={() => window.print()} disabled={loading || !data?.accounts.length}><Printer size={15} /> Print / Save PDF</Button>
         </div>
       </CardHeader>
       <CardContent>
         <div className="hidden print:block">
-          <h2 className="text-lg font-semibold">Big Joe Gold — {selectedAccount?.name ?? "Manual Bank & MOMO"} Statement</h2>
+          <h2 className="text-lg font-semibold">Big Joe Gold — {selectedStatementAccount ? `${selectedStatementAccount.name} Account Statement` : "Manual Bank & MOMO Daily Account Close"}</h2>
           <p className="text-xs">Period: {displayDate(`${from}T00:00:00.000Z`)} to {displayDate(`${to}T00:00:00.000Z`)}</p>
-          <p className="text-xs">Opening balance: {formatCurrency(statement.opening)} · Money received: {formatCurrency(statement.received)} · Money paid: {formatCurrency(statement.paid)} · Closing balance: {formatCurrency(statement.closing)}</p>
         </div>
-        {loading ? <p className="py-8 text-center text-sm text-[#7c8793]">Loading Manual Bank &amp; MOMO records…</p> : <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-xs">
-            <thead><tr className="border-b border-[#e7eaee] text-[10px] uppercase tracking-wide text-[#7c8793]">
-              <th className="px-2 py-2">Date</th><th className="px-2 py-2">Reference</th><th className="px-2 py-2">Direction</th><th className="px-2 py-2">Customer</th><th className="px-2 py-2">Phone</th><th className="px-2 py-2 text-right">Amount</th><th className="px-2 py-2 text-right">Balance</th><th className="px-2 py-2">Note</th>
-            </tr></thead>
-            <tbody>{statement.rows.map((row, index) => <tr key={`${row.reference}-${index}`} className="border-b border-[#edf0f3]">
-              <td className="whitespace-nowrap px-2 py-2.5">{displayDate(row.date)}</td><td className="px-2 py-2.5">{row.reference}</td>
-              <td className="whitespace-nowrap px-2 py-2.5">{row.direction === "RECEIVED" ? <span className="inline-flex items-center gap-1 text-emerald-700"><ArrowDownLeft size={13} /> Received</span> : row.direction === "PAID" ? <span className="inline-flex items-center gap-1 text-rose-700"><ArrowUpRight size={13} /> Paid</span> : row.direction}</td>
-              <td className="px-2 py-2.5">{row.customer}</td><td className="px-2 py-2.5">{row.phone}</td>
-              <td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(row.amount)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(row.balance)}</td><td className="px-2 py-2.5">{row.note}</td>
-            </tr>)}
-            {!statement.rows.length && <tr><td colSpan={8} className="px-2 py-8 text-center text-sm text-[#7c8793]">{selectedAccount ? `No manual payments recorded for ${selectedAccount.name} during this period.` : "Create a ledger to start a statement."}</td></tr>}
-            </tbody>
-          </table>
-        </div>}
+        <section className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold text-[#17212f]">{selectedStatementAccount ? "Account closing balance" : "All account closing balances"}</h2>
+          <div className="overflow-x-auto">
+            <table className="manual-momo-account-summary-table w-full min-w-[720px] text-left text-xs">
+              <thead><tr className="border-b border-[#e7eaee] text-[10px] uppercase tracking-wide text-[#7c8793]">
+                <th className="px-2 py-2">Account</th><th className="px-2 py-2">Type</th><th className="px-2 py-2">Bank / Telco</th><th className="px-2 py-2">Account number</th><th className="px-2 py-2 text-right">Opening</th><th className="px-2 py-2 text-right">Received</th><th className="px-2 py-2 text-right">Paid</th><th className="px-2 py-2 text-right">Closing</th>
+              </tr></thead>
+              <tbody>{accountSummaryRows}</tbody>
+            </table>
+          </div>
+        </section>
+        <section>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-[#17212f]">{selectedStatementAccount ? `${selectedStatementAccount.name} transactions` : "All account transactions"}</h2>
+            {!selectedStatementAccount && <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="manual-momo-transaction-toggle"
+              aria-expanded={showAllTransactions}
+              aria-controls="manual-momo-all-transactions"
+              onClick={() => setShowAllTransactions((current) => !current)}
+            >
+              {showAllTransactions ? "Hide all Transactions" : "View all Transactions"}
+            </Button>}
+          </div>
+          <div id="manual-momo-all-transactions" hidden={!selectedStatementAccount && !showAllTransactions} className={`manual-momo-all-transactions overflow-x-auto${selectedStatementAccount ? " manual-momo-single-account-transactions" : ""}`}>
+            <table className="manual-momo-transactions-table w-full min-w-[1120px] text-left text-xs">
+              <thead><tr className="border-b border-[#e7eaee] text-[10px] uppercase tracking-wide text-[#7c8793]">
+                <th className="px-2 py-2">Account</th><th className="px-2 py-2">Type</th><th className="px-2 py-2">Date</th><th className="px-2 py-2">Reference</th><th className="px-2 py-2">Direction</th><th className="px-2 py-2">Customer</th><th className="px-2 py-2">Phone</th><th className="px-2 py-2 text-right">Amount</th><th className="px-2 py-2 text-right">Balance</th><th className="px-2 py-2">Note</th>
+              </tr></thead>
+              <tbody>{accountTransactionRows}{emptyTransactionRow}</tbody>
+            </table>
+          </div>
+        </section>
+        {loading && <p className="py-4 text-center text-sm text-[#7c8793]">Loading Manual Bank &amp; MOMO records…</p>}
+        {!loading && !accountSummaries.length && <p className="py-4 text-sm text-[#7c8793]">No account ledgers yet. Create one above to begin.</p>}
       </CardContent>
     </Card>
+    </div>
   </div>;
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return <Card><CardContent className="p-4"><p className="text-[10px] font-semibold uppercase tracking-wide text-[#7c8793]">{label}</p><p className="mt-2 text-lg font-bold text-[#17212f]">{value}</p></CardContent></Card>;
 }
