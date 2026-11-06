@@ -84,8 +84,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
   const [buyerId, setBuyerId] = useState("");
   const [transactionDate, setTransactionDate] = useState(localDateTime);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
-  const [selectedLotId, setSelectedLotId] = useState("");
-  const [selectedLotGrams, setSelectedLotGrams] = useState("");
+  const [selectedLotIds, setSelectedLotIds] = useState<string[]>([]);
   const [measurementTopGrams, setMeasurementTopGrams] = useState("");
   const [measurementDownGrams, setMeasurementDownGrams] = useState("");
   const [measurementConfirmed, setMeasurementConfirmed] = useState(false);
@@ -154,7 +153,9 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
   }, [measurementConfirmed, allocations.length, measurement.result, allocatedGramsDecimal]);
   const amountPaid = paymentAmountTouched ? initialPayment : "0";
   const selectedBuyer = buyers.find((buyer) => buyer.id === buyerId);
-  const selectedLot = lots.find((lot) => lot.id === selectedLotId);
+  const selectableLots = lots.filter((lot) => lot.status === "ACTIVE"
+    && Number(lot.remainingGrams) > 0
+    && !allocations.some((allocation) => allocation.lotId === lot.id));
   const availableStockGrams = lots.filter((lot) => lot.status === "ACTIVE").reduce((sum, lot) => sum + Math.max(0, Number(lot.remainingGrams)), 0);
   const saleKarat = measurement.result ? formatTwoDecimalTruncated(measurement.result.karat.toString()) : "—";
 
@@ -243,34 +244,26 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [measurementModalOpen]);
 
-  function selectSaleLot(lotId: string) {
-    setSelectedLotId(lotId);
-    const lot = lots.find((item) => item.id === lotId);
-    setSelectedLotGrams(lot ? String(lot.remainingGrams) : "");
-  }
-
-  function addSelectedBatch() {
+  function addSelectedBatches() {
     setError("");
-    if (!selectedLot) {
-      setError("Select a stock batch.");
+    if (!selectedLotIds.length) {
+      setError("Select at least one stock batch.");
       return;
     }
-    const grams = Number(selectedLotGrams);
-    if (!Number.isFinite(grams) || grams <= 0) {
-      setError("Enter a weight greater than zero for the selected batch.");
+    const selectedLots = selectedLotIds.map((lotId) => lots.find((lot) => lot.id === lotId));
+    if (selectedLots.some((lot) => !lot || lot.status !== "ACTIVE" || Number(lot.remainingGrams) <= 0)) {
+      setError("One or more selected batches are no longer available. Refresh inventory and try again.");
       return;
     }
-    if (grams > Number(selectedLot.remainingGrams)) {
-      setError("The selected weight exceeds the batch's available stock.");
-      return;
-    }
-    if (!allocations.some((allocation) => allocation.lotId === selectedLot.id) && allocations.length >= 50) {
+    if (allocations.length + selectedLots.length > 50) {
       setError("A sale can include no more than 50 stock batches.");
       return;
     }
-    const remaining = allocations.filter((allocation) => allocation.lotId !== selectedLot.id);
-    updateAllocations([...remaining, { lotId: selectedLot.id, grams: selectedLotGrams }]);
-    setSelectedLotGrams("");
+    updateAllocations([
+      ...allocations,
+      ...selectedLots.flatMap((lot) => lot ? [{ lotId: lot.id, grams: String(lot.remainingGrams) }] : []),
+    ]);
+    setSelectedLotIds([]);
   }
 
   function updateAllocations(next: Allocation[]) {
@@ -288,8 +281,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
   function clearSale() {
     setBuyerId("");
     updateAllocations([]);
-    setSelectedLotId("");
-    setSelectedLotGrams("");
+    setSelectedLotIds([]);
     setDiscountAmount("0");
     setInitialPayment("0");
     setPaymentAmountTouched(false);
@@ -483,21 +475,23 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
             <CardHeader><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-[#f5e3b0] text-[#795719]"><Coins size={16} /></span><CardTitle>Gold Details</CardTitle></div><p className="text-xs text-[#89929d]">Available stock: {formatWeight(availableStockGrams, "g", 2)}</p></CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="Stock batch" htmlFor="sale-batch"><StockAutocomplete id="sale-batch" value={selectedLotId} onChange={selectSaleLot} placeholder="Search available batches" lots={lots.filter((lot) => lot.status === "ACTIVE" && Number(lot.remainingGrams) > 0).map((lot): StockOption => ({ id: lot.id, source: lot.source || lot.trade?.customer?.name || "Unknown source", batchNumber: lot.batchNumber || lot.trade?.reference || "Unnumbered batch", receivedAt: lot.receivedAt, grams: lot.remainingGrams }))} /></FormField>
-                <div className="flex items-end gap-2"><FormField label="Batch weight (grams)" htmlFor="sale-batch-grams"><input id="sale-batch-grams" type="number" min="0.00001" max={selectedLot ? Number(selectedLot.remainingGrams) : undefined} step="0.00001" value={selectedLotGrams} onChange={(event) => setSelectedLotGrams(event.target.value)} className={fieldControlClass} placeholder="Enter grams" /></FormField><Button type="button" variant="outline" className="mb-0.5 h-10 shrink-0" disabled={!selectedLot || !selectedLotGrams} onClick={addSelectedBatch}><Plus size={14} /> Add batch</Button></div>
+                <FormField label="Stock batches" htmlFor="sale-batch"><StockAutocomplete id="sale-batch" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableLots.map((lot): StockOption => ({ id: lot.id, source: lot.trade?.customer?.name || lot.source || "Unknown customer", batchNumber: lot.batchNumber || lot.trade?.reference || "Unnumbered batch", receivedAt: lot.receivedAt, grams: lot.remainingGrams }))} /></FormField>
+                <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedBatches}><Plus size={14} /> Add selected batches</Button></div>
               </div>
+              {selectedLotIds.length > 0 && <p className="text-xs text-[#89929d]">Selected batches are added with their available weights. You can adjust each allocation below.</p>}
               {allocations.length > 0 ? <div className="space-y-2 rounded-lg border border-[#edf0f3] p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">Allocated batches</p>
                 {allocations.map((allocation) => {
                   const lot = lots.find((item) => item.id === allocation.lotId);
-                  const label = lot?.batchNumber || lot?.trade?.reference || "Stock batch";
+                  const label = lot?.trade?.customer?.name || lot?.source || "Unknown customer";
+                  const receivedDate = lot ? new Date(lot.receivedAt).toLocaleDateString("en-GH") : "";
                   return <div key={allocation.lotId} className="grid grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-2 text-xs">
-                    <span className="truncate font-medium text-[#344151]">{label}<span className="ml-2 font-normal text-[#89929d]">{formatWeight(lot?.remainingGrams ?? 0, "g", 2)} available</span></span>
-                    <input aria-label={`Allocated grams from ${label}`} type="number" min="0" max={Number(lot?.remainingGrams ?? 0)} step="0.00001" value={allocation.grams} onChange={(event) => updateAllocations(allocations.map((entry) => entry.lotId === allocation.lotId ? { ...entry, grams: event.target.value } : entry))} className="h-9 rounded-md border border-[#dfe4e9] px-2 text-xs outline-none focus:border-[#bc8c36]" />
+                    <span className="truncate font-medium text-[#344151]">{label}<span className="ml-2 font-normal text-[#89929d]">{receivedDate}</span></span>
+                    <div className="flex items-center gap-1"><input aria-label={`Allocated grams from ${label} received ${receivedDate}`} type="number" min="0" max={Number(lot?.remainingGrams ?? 0)} step="0.00001" value={allocation.grams} onChange={(event) => updateAllocations(allocations.map((entry) => entry.lotId === allocation.lotId ? { ...entry, grams: event.target.value } : entry))} className="h-9 min-w-0 flex-1 rounded-md border border-[#dfe4e9] px-2 text-xs outline-none focus:border-[#bc8c36]" /><span className="text-[#89929d]">g</span></div>
                     <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${label}`} onClick={() => updateAllocations(allocations.filter((entry) => entry.lotId !== allocation.lotId))}><X size={14} /></Button>
                   </div>;
                 })}
-              </div> : <p className="rounded-lg bg-[#fafbfc] p-3 text-xs text-[#89929d]">{lots.some((lot) => lot.status === "ACTIVE" && Number(lot.remainingGrams) > 0) ? "Choose a batch and enter its weight to add stock to this sale." : "No available gold stock."}</p>}
+              </div> : <p className="rounded-lg bg-[#fafbfc] p-3 text-xs text-[#89929d]">{lots.some((lot) => lot.status === "ACTIVE" && Number(lot.remainingGrams) > 0) ? "Choose one or more batches to add stock to this sale." : "No available gold stock."}</p>}
               <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#e8ebef] p-3">
                 <Button type="button" variant={measurementConfirmed ? "outline" : "gold"} disabled={!boardPrice} onClick={() => setMeasurementModalOpen(true)}>{measurementConfirmed ? <><Check size={14} /> Edit gold measurements</> : "Measure gold"}</Button>
                 <p className="text-xs text-[#89929d]">{measurementConfirmed && measurement.result
