@@ -17,8 +17,9 @@ import { createBatchCode } from "../src/lib/records";
 import { calculateCashBalances } from "../src/lib/finance";
 import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoAccountSummaries, buildManualMomoStatement } from "../src/lib/manual-momo";
-import { buildDailyBuyerFinancingSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "../src/lib/reporting";
-import { customerAdvanceSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
+import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "../src/lib/reporting";
+import { calculateMansoBranchPurchase } from "../src/lib/manso-branch";
+import { customerAdvanceSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, mansoBranchActionSchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
 
 test("generated batch codes are eight uppercase alphanumeric characters", () => {
   const code = createBatchCode();
@@ -32,7 +33,7 @@ test("trade value uses pure grams and truncates to pesewas", () => {
   assert.equal(calculateTradeAmount(0.001, 10000, 1.239).total.toString(), "1.23");
 });
 
-test("profit reports use FIFO cost for full and partial sales", () => {
+test("profit reports use the allocated receiving cost for full and partial sales", () => {
   const purchase = calculatePurchaseMeasurements("455", "24", "11166");
   const fullSale = calculateMeasuredSaleQuote("455", "24", "12333");
   const fullProfit = calculateProfitMetrics(fullSale.total.toFixed(2), purchase.amount.toFixed(2));
@@ -49,6 +50,32 @@ test("profit reports use FIFO cost for full and partial sales", () => {
   assert.equal(partialSale.total.toFixed(2), "323171.78");
   assert.equal(partialProfit.profit, 30554.94);
   assert.ok(Math.abs((partialProfit.returnOnCost ?? 0) - 0.104420) < 0.000001);
+});
+
+test("Manso branch gold uses measured purity and entered cost without board pricing", () => {
+  const purchase = calculateMansoBranchPurchase("455", "24", "600000", DEFAULT_PURCHASE_FORMULA_RULES);
+  assert.equal(purchase.measurements.karat.toFixed(2), "23.36");
+  assert.equal(purchase.actualCost.toFixed(2), "600000.00");
+  assert.equal(purchase.costPerGram.toFixed(6), "1318.681318");
+  assert.ok(purchase.pricePerGram.greaterThan(0));
+});
+
+test("Manso branch gold receipt requires an actual cost and measured weights", () => {
+  const valid = mansoBranchActionSchema.safeParse({
+    action: "RECEIVE_GOLD",
+    topGrams: "455",
+    downGrams: "24",
+    actualCost: "600000",
+    transactionDate: new Date().toISOString(),
+  });
+  assert.equal(valid.success, true);
+  const missingCost = mansoBranchActionSchema.safeParse({
+    action: "RECEIVE_GOLD",
+    topGrams: "455",
+    downGrams: "24",
+    transactionDate: new Date().toISOString(),
+  });
+  assert.equal(missingCost.success, false);
 });
 
 test("advance gold fulfillment uses the current price for the released grams", () => {
@@ -812,6 +839,24 @@ test("daily supplier purchase summaries show receipts, sales value, and running 
 
   assert.deepEqual(rows, [
     { date: "2026-11-02", stockKg: 0.2, sales: 200, balance: 160 },
+  ]);
+});
+
+test("daily Manso summary reconciles advances, gold, expenses, returns, and running balance", () => {
+  const rows = buildDailyMansoBranchSummary([
+    { movementDate: "2026-10-31T12:00:00.000Z", type: "TRANSFER_IN", direction: "INBOUND", amount: 1000, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-02T09:00:00.000Z", type: "TRANSFER_IN", direction: "INBOUND", amount: 500.25, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-02T10:00:00.000Z", type: "PAYMENT", direction: "OUTBOUND", amount: 300, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: true },
+    { movementDate: "2026-11-02T11:00:00.000Z", type: "ADJUSTMENT_OUT", direction: "OUTBOUND", amount: 50, approvalStatus: "APPROVED", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-02T12:00:00.000Z", type: "ADJUSTMENT_OUT", direction: "OUTBOUND", amount: 25, approvalStatus: "PENDING", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-02T13:00:00.000Z", type: "TRANSFER_OUT", direction: "OUTBOUND", amount: 100, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-03T09:00:00.000Z", type: "TRANSFER_IN", direction: "INBOUND", amount: 200, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-03T10:00:00.000Z", type: "PAYMENT", direction: "OUTBOUND", amount: 50, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: true },
+  ], "2026-11-02", "2026-11-03");
+
+  assert.deepEqual(rows, [
+    { date: "2026-11-02", amountGiven: 500.25, goldValue: 300, expenses: 50, cashReturned: 100, balanceLeft: 1050.25 },
+    { date: "2026-11-03", amountGiven: 200, goldValue: 50, expenses: 0, cashReturned: 0, balanceLeft: 1200.25 },
   ]);
 });
 

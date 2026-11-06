@@ -356,6 +356,45 @@ export const financeMovementSchema = z.discriminatedUnion("action", [
   }).strict(),
 ]);
 
+const mansoMoney = z.string().trim()
+  .regex(/^\d{1,14}(?:\.\d{1,2})?$/, "Enter an amount with up to 2 decimal places")
+  .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0, "Amount must be greater than zero");
+const mansoGrams = z.string().trim()
+  .regex(/^\d{1,11}(?:\.\d{1,5})?$/, "Enter grams with up to 5 decimal places")
+  .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0, "Weight must be greater than zero");
+
+export const mansoBranchActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("ADVANCE"),
+    cashAccountId: z.string().trim().min(1).max(191),
+    amount: mansoMoney,
+    movementDate: z.string().datetime(),
+    description: z.string().trim().min(3).max(500),
+  }).strict(),
+  z.object({
+    action: z.literal("RETURN"),
+    cashAccountId: z.string().trim().min(1).max(191),
+    amount: mansoMoney,
+    movementDate: z.string().datetime(),
+    description: z.string().trim().min(3).max(500),
+  }).strict(),
+  z.object({
+    action: z.literal("RECEIVE_GOLD"),
+    topGrams: mansoGrams,
+    downGrams: mansoGrams,
+    actualCost: mansoMoney,
+    transactionDate: z.string().datetime(),
+    batchNumber: z.string().trim().max(120).optional().or(z.literal("")),
+    note: optionalText,
+  }).strict(),
+  z.object({
+    action: z.literal("EXPENSE"),
+    amount: mansoMoney,
+    movementDate: z.string().datetime(),
+    description: z.string().trim().min(3).max(500),
+  }).strict(),
+]);
+
 export const financeSettingsSchema = z.object({
   adjustmentApprovalThreshold: z.string().trim().regex(/^(?:\d{1,14}(?:\.\d{1,2})?)?$/).default(""),
 }).strict();

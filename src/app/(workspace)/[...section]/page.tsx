@@ -12,6 +12,7 @@ import { ReportsDashboard } from "@/components/reports-dashboard";
 import { FinancingManagement } from "@/components/financing-management";
 import { ManualMomo } from "@/components/manual-momo";
 import { ManualMomoContacts } from "@/components/manual-momo-contacts";
+import { MansoBranchManagement } from "@/components/manso-branch-management";
 import { getWorkspaceView, type WorkspaceModule, type WorkspaceView } from "@/lib/workspace-navigation";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,10 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
     canWrite={Boolean(user && can(user.role, "payments:write", user.permissions))}
     canCreateCustomer={Boolean(user && can(user.role, "customers:write", user.permissions))}
     canFulfill={Boolean(user && can(user.role, "payments:write", user.permissions) && can(user.role, "sales:write", user.permissions) && can(user.role, "inventory:read", user.permissions))}
+  />;
+  if (path === "/manso-branch") return <MansoBranchManagement
+    canManageFunds={Boolean(user && can(user.role, "finance:manage", user.permissions))}
+    canReceiveGold={Boolean(user && can(user.role, "purchases:write", user.permissions) && can(user.role, "payments:write", user.permissions))}
   />;
   if (path === "/finance/customer-advances") return <FinancingManagement
     canWrite={Boolean(user && can(user.role, "payments:write", user.permissions))}

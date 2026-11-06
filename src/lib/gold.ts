@@ -4,15 +4,7 @@ import { DEFAULT_PURCHASE_FORMULA_RULES, MAX_PURCHASE_KARAT, type PurchaseFormul
 
 export const PURCHASE_CALCULATION_RULES = DEFAULT_PURCHASE_FORMULA_RULES;
 
-export function calculatePurchaseMeasurements(
-  topGramsInput: number | string,
-  downGramsInput: number | string,
-  boardPriceInput: number | string,
-  rules: PurchaseFormulaRules = PURCHASE_CALCULATION_RULES,
-) {
-  const topGrams = positiveDecimal(topGramsInput, "Top weight");
-  const downGrams = positiveDecimal(downGramsInput, "Down weight");
-  const boardPrice = positiveDecimal(boardPriceInput, "Gold board price");
+function calculateGoldMeasurementsFromDecimals(topGrams: Prisma.Decimal, downGrams: Prisma.Decimal, rules: PurchaseFormulaRules) {
   const pounds = topGrams.div(rules.poundsKgDivisor)
     .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN);
   const exactDensity = topGrams.div(downGrams);
@@ -29,23 +21,52 @@ export function calculatePurchaseMeasurements(
     throw new RangeError("Calculated karat exceeds 24. Verify the top and down weights; pure gold is 24 karat.");
   }
   const purity = karat.div(24).mul(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  const amount = karat
-    .mul(boardPrice)
-    .div(rules.amountKaratDivisor)
-    .mul(pounds)
-    .toDecimalPlaces(2);
 
-  if (![pounds, exactDensity, density, karat, purity, amount].every((value) => value.isFinite())) {
+  if (![pounds, exactDensity, density, karat, purity].every((value) => value.isFinite())) {
     throw new RangeError("Purchase measurements must produce finite values");
   }
-  if (!pounds.greaterThan(0) || !density.greaterThan(0) || !karat.greaterThan(0) || !amount.greaterThan(0)) {
+  if (!pounds.greaterThan(0) || !density.greaterThan(0) || !karat.greaterThan(0)) {
     throw new RangeError("The entered measurements produce a non-positive karat or purchase amount");
   }
-  if (exactDensity.greaterThan("9999999999999999.99999999") || amount.greaterThan("99999999999999.99")) {
-    throw new RangeError("The calculated density or purchase amount exceeds the supported storage range");
+  if (exactDensity.greaterThan("9999999999999999.99999999")) {
+    throw new RangeError("The calculated density exceeds the supported storage range");
   }
+  return { topGrams, downGrams, pounds, density, karat, purity };
+}
 
-  return { topGrams, downGrams, pounds, density, karat, purity, boardPrice, amount };
+export function calculateGoldMeasurements(
+  topGramsInput: number | string,
+  downGramsInput: number | string,
+  rules: PurchaseFormulaRules = PURCHASE_CALCULATION_RULES,
+) {
+  return calculateGoldMeasurementsFromDecimals(
+    positiveDecimal(topGramsInput, "Top weight"),
+    positiveDecimal(downGramsInput, "Down weight"),
+    rules,
+  );
+}
+
+export function calculatePurchaseMeasurements(
+  topGramsInput: number | string,
+  downGramsInput: number | string,
+  boardPriceInput: number | string,
+  rules: PurchaseFormulaRules = PURCHASE_CALCULATION_RULES,
+) {
+  const topGrams = positiveDecimal(topGramsInput, "Top weight");
+  const downGrams = positiveDecimal(downGramsInput, "Down weight");
+  const boardPrice = positiveDecimal(boardPriceInput, "Gold board price");
+  const measurements = calculateGoldMeasurementsFromDecimals(topGrams, downGrams, rules);
+  const amount = measurements.karat
+    .mul(boardPrice)
+    .div(rules.amountKaratDivisor)
+    .mul(measurements.pounds)
+    .toDecimalPlaces(2);
+  if (!amount.isFinite()) throw new RangeError("Purchase amount must be finite");
+  if (!amount.greaterThan(0)) throw new RangeError("The entered measurements produce a non-positive purchase amount");
+  if (amount.greaterThan("99999999999999.99")) {
+    throw new RangeError("The calculated purchase amount exceeds the supported storage range");
+  }
+  return { ...measurements, boardPrice, amount };
 }
 
 export function calculateMeasuredSaleQuote(

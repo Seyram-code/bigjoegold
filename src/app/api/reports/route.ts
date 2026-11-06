@@ -5,7 +5,7 @@ import { formatPriceAmount } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { apiError, HttpError } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { buildDailyBuyerFinancingSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "@/lib/reporting";
+import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "@/lib/reporting";
 
 const zero = () => new Prisma.Decimal(0);
 
@@ -55,6 +55,7 @@ export async function GET(request: Request) {
       customerAdvanceAccounts,
       buyerFinanceAccounts,
       paymentAccounts,
+      mansoBranch,
     ] = await Promise.all([
       prisma.trade.findMany({
         where: {
@@ -76,6 +77,7 @@ export async function GET(request: Request) {
           purityBps: true,
           transactionDate: true,
           customer: { select: { id: true, code: true, name: true } },
+          purchaseMeasurement: { select: { calculationSource: true } },
           createdBy: { select: { name: true } },
           payments: { select: { amount: true, direction: true } },
           advanceFulfillment: { select: { amount: true } },
@@ -182,6 +184,7 @@ export async function GET(request: Request) {
             totalAmount: true,
             quantityKg: true,
             transactionDate: true,
+            purchaseMeasurement: { select: { calculationSource: true } },
             customer: { select: { name: true } },
             payments: { select: { amount: true, direction: true, paidAt: true } },
             advanceFulfillment: { select: { amount: true } },
@@ -281,7 +284,32 @@ export async function GET(request: Request) {
           select: { id: true, name: true, type: true, currency: true, isActive: true },
         })
         : Promise.resolve(null),
+      readPayments
+        ? prisma.mansoBranch.findUnique({ where: { id: "manso" }, select: { cashAccountId: true } })
+        : Promise.resolve(null),
     ]);
+    const mansoMovements = mansoBranch
+      ? await prisma.cashMovement.findMany({
+        where: { accountId: mansoBranch.cashAccountId, movementDate: { lte: to } },
+        orderBy: [{ movementDate: "asc" }, { id: "asc" }],
+        select: {
+          movementDate: true,
+          type: true,
+          direction: true,
+          amount: true,
+          approvalStatus: true,
+          payment: {
+            select: {
+              trade: {
+                select: {
+                  purchaseMeasurement: { select: { calculationSource: true } },
+                },
+              },
+            },
+          },
+        },
+      })
+      : [];
 
     const financingRows = readPayments ? [
       ...(financingPayments ?? []).map((payment) => {
@@ -380,6 +408,7 @@ export async function GET(request: Request) {
     const supplierDailySummary = readPayments
       ? buildDailySupplierPurchaseSummary((allOpenTrades ?? [])
         .filter((trade) => trade.type === "PURCHASE")
+        .filter((trade) => trade.purchaseMeasurement?.calculationSource !== "MANSO_MANUAL_COST")
         .map((trade) => ({
           transactionDate: trade.transactionDate.toISOString(),
           quantityKg: trade.quantityKg.toNumber(),
@@ -394,6 +423,16 @@ export async function GET(request: Request) {
             createdAt: trade.buyerFinanceSettlement.createdAt.toISOString(),
           }] : [],
         })), from.toISOString().slice(0, 10), to.toISOString().slice(0, 10))
+      : null;
+    const mansoDailySummary = readPayments
+      ? buildDailyMansoBranchSummary(mansoMovements.map((movement) => ({
+        movementDate: movement.movementDate.toISOString(),
+        type: movement.type,
+        direction: movement.direction,
+        amount: movement.amount.toNumber(),
+        approvalStatus: movement.approvalStatus,
+        isGoldPurchasePayment: movement.payment?.trade?.purchaseMeasurement?.calculationSource === "MANSO_MANUAL_COST",
+      })), from.toISOString().slice(0, 10), to.toISOString().slice(0, 10))
       : null;
 
     const tradeRows = trades.map((trade) => {
@@ -436,7 +475,9 @@ export async function GET(request: Request) {
         paidAmount: totalPaid.toNumber(),
         balance: balance.toNumber(),
         customerId: readCustomerDetails ? trade.customer?.id ?? null : null,
-        customer: readCustomerDetails ? trade.customer?.name ?? "Unspecified" : trade.customer ? "Restricted customer" : "Unspecified",
+        customer: trade.type === "PURCHASE" && trade.purchaseMeasurement?.calculationSource === "MANSO_MANUAL_COST"
+          ? "Manso Branch"
+          : readCustomerDetails ? trade.customer?.name ?? "Unspecified" : trade.customer ? "Restricted customer" : "Unspecified",
         customerCode: readCustomerDetails ? trade.customer?.code ?? "" : "",
         createdBy: readStaff ? trade.createdBy.name : "",
       };
@@ -546,7 +587,7 @@ export async function GET(request: Request) {
       },
       profitAvailability: {
         costBasisComplete,
-        method: "Profit is net sales value minus the FIFO receiving cost of gold sold or released. Gross margin is profit divided by sales value; return on cost is profit divided by receiving cost.",
+        method: "Profit is net sales value minus the recorded receiving cost of the stock allocated to gold sold or released. Gross margin is profit divided by sales value; return on cost is profit divided by receiving cost.",
         explanation: profit === null
           ? "Profit is unavailable because a cost basis is missing for one or more sales."
           : "Profit is recognized only for gold sold or released. Partial sales use the receiving cost of the grams allocated from each stock batch; unsold gold remains inventory.",
@@ -612,6 +653,7 @@ export async function GET(request: Request) {
       financing: financingRows,
       financingAccounts,
       supplierDailySummary,
+      mansoDailySummary,
       buyerFinancingDailySummary,
     });
   } catch (error) {

@@ -73,6 +73,7 @@ type ReportData = {
   financing: ReportRow[] | null;
   financingAccounts: ReportRow[] | null;
   supplierDailySummary: ReportRow[] | null;
+  mansoDailySummary: ReportRow[] | null;
   buyerFinancingDailySummary: ReportRow[] | null;
 };
 
@@ -240,6 +241,13 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
       ...data.supplierDailySummary.map((row) => [row.date, row.stockKg, row.sales, row.balance]),
     ],
   });
+  if (data.mansoDailySummary) sheets.push({
+    name: "Manso daily funds",
+    rows: [
+      ["Date", "Amount given (GHS)", "Gold value received (GHS)", "Expenses (GHS)", "Cash returned (GHS)", "Balance left (GHS)"],
+      ...data.mansoDailySummary.map((row) => [row.date, row.amountGiven, row.goldValue, row.expenses, row.cashReturned, row.balanceLeft]),
+    ],
+  });
   if (data.buyerFinancingDailySummary) sheets.push({
     name: "Customer financing daily",
     rows: [
@@ -250,11 +258,11 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
   return sheets;
 }
 
-function printFinancingSummary() {
+function printReportSummary(target: "financing-summary" | "manso-summary") {
   const clearPrintTarget = () => {
     delete document.body.dataset.printTarget;
   };
-  document.body.dataset.printTarget = "financing-summary";
+  document.body.dataset.printTarget = target;
   window.addEventListener("afterprint", clearPrintTarget, { once: true });
   window.print();
 }
@@ -622,6 +630,14 @@ export function ReportsDashboard() {
       { key: "financing", label: "Financing", format: "currency" },
       { key: "balance", label: "Balance", format: "currency" },
     );
+    const dailyMansoColumns = makeColumns(
+      { key: "date", label: "Date", format: "day" },
+      { key: "amountGiven", label: "Amount given", format: "currency" },
+      { key: "goldValue", label: "Gold value received", format: "currency" },
+      { key: "expenses", label: "Expenses", format: "currency" },
+      { key: "cashReturned", label: "Cash returned", format: "currency" },
+      { key: "balanceLeft", label: "Balance left", format: "currency" },
+    );
     reportContent = <>
       <Card className="financing-summary-print-root">
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3">
@@ -631,7 +647,7 @@ export function ReportsDashboard() {
               ? "Supplier purchases within the selected period, with total outstanding purchase balances as of each date."
               : "Gold received against buyer financing, cash financing advanced, and the running amount owed as of each date."}</p>
           </div>
-          <Button type="button" variant="outline" size="sm" className="report-controls shrink-0" onClick={printFinancingSummary}>
+          <Button type="button" variant="outline" size="sm" className="report-controls shrink-0" onClick={() => printReportSummary("financing-summary")}>
             <Printer size={14} /> Print summary
           </Button>
         </CardHeader>
@@ -647,6 +663,28 @@ export function ReportsDashboard() {
           />
         </CardContent>
       </Card>
+      {customerAdvances && <Card className="manso-summary-print-root">
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <div className="min-w-0 flex-1 text-left">
+            <CardTitle>Daily Manso Branch funds and gold summary</CardTitle>
+            <p className="text-xs text-[#7c8793]">Internal branch purchases are excluded from supplier balances. Balance left reflects funds advanced, gold purchases, recorded expenses, and returned cash.</p>
+          </div>
+          <Button type="button" variant="outline" size="sm" className="report-controls shrink-0" onClick={() => printReportSummary("manso-summary")}>
+            <Printer size={14} /> Print summary
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-2 px-4 pb-4">
+          <div className="hidden print:block">
+            <h3 className="text-lg font-semibold">Big Joe Gold — Daily Manso Branch Funds Summary</h3>
+            <p className="text-xs">Period: {new Date(data.period.from).toLocaleDateString("en-GH")} to {new Date(data.period.to).toLocaleDateString("en-GH")}</p>
+          </div>
+          <ReportTable
+            rows={data.mansoDailySummary ?? []}
+            columns={dailyMansoColumns}
+            emptyMessage="No Manso Branch funds activity in this date range."
+          />
+        </CardContent>
+      </Card>}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {customerAdvances ? <>
           <Metric label="Advance funds received" value={currency(total("Funds received"))} />

@@ -36,6 +36,24 @@ export type DailySupplierPurchaseSummary = {
   balance: number;
 };
 
+export type MansoBranchMovement = {
+  movementDate: string;
+  type: string;
+  direction: "INBOUND" | "OUTBOUND";
+  amount: number;
+  approvalStatus: string;
+  isGoldPurchasePayment: boolean;
+};
+
+export type DailyMansoBranchSummary = {
+  date: string;
+  amountGiven: number;
+  goldValue: number;
+  expenses: number;
+  cashReturned: number;
+  balanceLeft: number;
+};
+
 function amountInPesewas(value: string | number) {
   const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value).trim());
   if (!match) throw new RangeError("Profit amounts must be valid GHS values");
@@ -187,6 +205,56 @@ export function buildDailySupplierPurchaseSummary(
       return { date, stockKg: row.stockKg, sales: row.salesPesewas / 100, balance: balancePesewas / 100 };
     })
     .filter((row) => row.date >= from && row.date <= to);
+}
+
+export function buildDailyMansoBranchSummary(
+  movements: MansoBranchMovement[],
+  from: string,
+  to: string,
+): DailyMansoBranchSummary[] {
+  const daily = new Map<string, {
+    amountGivenPesewas: number;
+    goldValuePesewas: number;
+    expensesPesewas: number;
+    cashReturnedPesewas: number;
+    balanceChangePesewas: number;
+  }>();
+  const eligibleMovements = movements
+    .filter((movement) => ["NOT_REQUIRED", "APPROVED"].includes(movement.approvalStatus))
+    .map((movement) => ({ ...movement, date: dateOnly(movement.movementDate), amountPesewas: toPesewas(movement.amount) }))
+    .filter((movement) => movement.date <= to);
+  for (const movement of eligibleMovements) {
+    const row = daily.get(movement.date) ?? {
+      amountGivenPesewas: 0,
+      goldValuePesewas: 0,
+      expensesPesewas: 0,
+      cashReturnedPesewas: 0,
+      balanceChangePesewas: 0,
+    };
+    if (movement.type === "TRANSFER_IN") row.amountGivenPesewas += movement.amountPesewas;
+    if (movement.type === "TRANSFER_OUT") row.cashReturnedPesewas += movement.amountPesewas;
+    if (movement.type === "ADJUSTMENT_OUT") row.expensesPesewas += movement.amountPesewas;
+    if (movement.isGoldPurchasePayment && movement.direction === "OUTBOUND") {
+      row.goldValuePesewas += movement.amountPesewas;
+    }
+    row.balanceChangePesewas += movement.direction === "INBOUND" ? movement.amountPesewas : -movement.amountPesewas;
+    daily.set(movement.date, row);
+  }
+  let balancePesewas = 0;
+  return [...daily.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, row]) => {
+      balancePesewas += row.balanceChangePesewas;
+      return {
+        date,
+        amountGiven: row.amountGivenPesewas / 100,
+        goldValue: row.goldValuePesewas / 100,
+        expenses: row.expensesPesewas / 100,
+        cashReturned: row.cashReturnedPesewas / 100,
+        balanceLeft: balancePesewas / 100,
+      };
+    })
+    .filter((row) => row.date >= from);
 }
 
 function dateBucket(value: string, grouping: ReportGrouping) {

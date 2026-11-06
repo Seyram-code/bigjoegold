@@ -80,6 +80,7 @@ export const workspaceNavigation: NavigationItem[] = [
   },
   { label: "Financing", href: "/finance/financing", permission: "payments" },
   { label: "Manual Bank & MOMO", href: "/manual-momo", permission: "payments" },
+  { label: "Manso Branch", href: "/manso-branch", permission: "payments" },
   {
     label: "Finance", href: "/finance/accounts", children: [
       { label: "Payments Received", href: "/finance/payments-received", permission: "payments" },
@@ -125,6 +126,7 @@ const views: WorkspaceView[] = [
   { href: "/finance/customer-advances", label: "Supplier Gold Advances", module: "payments", permission: "payments" },
   { href: "/finance/buyer-financing", label: "Customer Gold Financing", module: "payments", permission: "payments" },
   { href: "/manual-momo", label: "Manual Bank & MOMO", module: "payments", permission: "payments" },
+  { href: "/manso-branch", label: "Manso Branch", module: "payments", permission: "payments" },
   { href: "/manual-momo/contacts", label: "Manual Bank & MOMO Contacts", module: "payments", permission: "payments" },
   { href: "/finance/accounts", label: "Cash and Bank Accounts", module: "payments", permission: "reports" },
   { href: "/finance/summaries", label: "Financial Summaries", module: "reports", permission: "reports" },

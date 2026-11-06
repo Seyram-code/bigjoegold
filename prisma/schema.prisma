@@ -606,8 +606,16 @@ model CashAccount {
   createdBy        User               @relation("FinanceAccountCreatedBy", fields: [createdById], references: [id])
   payments         Payment[]
   movements        CashMovement[]
+  mansoBranch      MansoBranch?
 
   @@index([isActive, type])
+}
+
+model MansoBranch {
+  id            String      @id @default("manso") @db.VarChar(191)
+  cashAccountId String      @unique
+  cashAccount   CashAccount @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  createdAt     DateTime    @default(now())
 }
 
 model ManualMomoAccount {

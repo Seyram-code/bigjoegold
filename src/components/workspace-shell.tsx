@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import {
-  Activity, ArrowDownToLine, ArrowLeftRight, BarChart3, ChevronDown, ChevronRight,
+  Activity, ArrowDownToLine, ArrowLeftRight, BarChart3, Building2, ChevronDown, ChevronRight,
   CircleDollarSign, Coins, Eye, EyeOff, LayoutDashboard, LogOut, Menu, Package, Settings2,
   ShieldCheck, Users, WalletCards, X,
 } from "lucide-react";
@@ -346,6 +346,7 @@ function navigationIcon(label: string) {
     Transactions: WalletCards,
     "Gold Price": Coins,
     "Manual Bank & MOMO": Coins,
+    "Manso Branch": Building2,
     Finance: CircleDollarSign,
     Reports: BarChart3,
     "Staff Management": ShieldCheck,

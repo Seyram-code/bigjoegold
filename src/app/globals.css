@@ -343,6 +343,12 @@ input[type="number"]::-webkit-outer-spin-button {
   body[data-print-target="financing-summary"] .financing-summary-print-root,
   body[data-print-target="financing-summary"] .financing-summary-print-root * { visibility: visible !important; }
   .financing-summary-print-root { position: fixed !important; inset: 0 !important; width: 100% !important; height: max-content !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; }
+  body[data-print-target="manso-summary"] * { visibility: hidden !important; }
+  body[data-print-target="manso-summary"] .report-print-area,
+  body[data-print-target="manso-summary"] .report-print-area * { visibility: hidden !important; }
+  body[data-print-target="manso-summary"] .manso-summary-print-root,
+  body[data-print-target="manso-summary"] .manso-summary-print-root * { visibility: visible !important; }
+  .manso-summary-print-root { position: fixed !important; inset: 0 !important; width: 100% !important; height: max-content !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; }
   body:has(.manual-momo-print-root) * { visibility: hidden !important; }
   body:has(.manual-momo-print-root) .manual-momo-print-root,
   body:has(.manual-momo-print-root) .manual-momo-print-root * { visibility: visible !important; }
