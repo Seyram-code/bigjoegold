@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarPicker } from "@/components/ui/calendar-picker";
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
+import { SavedContactAutocomplete } from "@/components/ui/saved-contact-autocomplete";
 import { useToast } from "@/components/ui/toast-provider";
 import { formatCurrency } from "@/lib/formatters";
 import { buildManualMomoAccountSummaries, type ManualMomoStatementEntry } from "@/lib/manual-momo";
 
 type Direction = "INBOUND" | "OUTBOUND";
-type AccountType = "BANK" | "MOBILE_MONEY";
+type AccountType = "CASH" | "BANK" | "MOBILE_MONEY";
 type Account = {
   id: string;
   name: string;
@@ -34,6 +35,7 @@ type Contact = { id: string; name: string; phone: string | null };
 const today = new Date().toISOString().slice(0, 10);
 const fieldLabelClass = "mb-1.5 block text-xs font-medium text-[#576170]";
 const dateInputClass = "h-10 w-full rounded-lg border border-[#dfe4e9] bg-white px-3 text-sm text-[#17212f]";
+const accountTypeLabel = (type: AccountType) => type === "CASH" ? "Cash" : type === "BANK" ? "Bank" : "Mobile Money";
 
 function toApiDate(value: string) {
   return `${value}T12:00:00.000Z`;
@@ -145,13 +147,13 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
   const selectedStatementAccount = data?.accounts.find((account) => account.id === statementAccountId);
   const accountSummaryRows = visibleAccountSummaries.map(({ account, opening, received, paid, closing }) => (
     <tr key={account.id} className="border-b border-[#edf0f3]">
-      <td className="px-2 py-2.5 font-medium">{account.name}</td><td className="px-2 py-2.5">{account.type === "BANK" ? "Bank" : "Mobile Money"}</td><td className="px-2 py-2.5">{account.bankNameTelco}</td><td className="px-2 py-2.5">{account.accountNumber || "—"}</td>
+      <td className="px-2 py-2.5 font-medium">{account.name}</td><td className="px-2 py-2.5">{accountTypeLabel(account.type)}</td><td className="px-2 py-2.5">{account.bankNameTelco || "—"}</td><td className="px-2 py-2.5">{account.accountNumber || "—"}</td>
       <td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(opening)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(received)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right">{formatCurrency(paid)}</td><td className="whitespace-nowrap px-2 py-2.5 text-right font-semibold">{formatCurrency(closing)}</td>
     </tr>
   ));
   const accountTransactionRows = visibleAccountRows.map((row) => (
     <tr key={row.rowKey} className={`border-b border-[#edf0f3]${row.direction === "OPENING BALANCE" ? " font-semibold" : ""}`}>
-      <td className="px-2 py-2.5 font-semibold">{row.accountName}</td><td className="px-2 py-2.5">{row.accountType === "BANK" ? "Bank" : "Mobile Money"}</td>
+      <td className="px-2 py-2.5 font-semibold">{row.accountName}</td><td className="px-2 py-2.5">{accountTypeLabel(row.accountType)}</td>
       <td className="whitespace-nowrap px-2 py-2.5">{displayDate(row.date)}</td><td className="px-2 py-2.5">{row.reference}</td>
       <td className="whitespace-nowrap px-2 py-2.5">{row.direction === "RECEIVED" ? <span className="inline-flex items-center gap-1 text-emerald-700"><ArrowDownLeft size={13} /> Received</span> : row.direction === "PAID" ? <span className="inline-flex items-center gap-1 text-rose-700"><ArrowUpRight size={13} /> Paid</span> : row.direction}</td>
       <td className="px-2 py-2.5">{row.customer}</td><td className="px-2 py-2.5">{row.phone}</td>
@@ -242,7 +244,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="text-xl font-bold text-[#17212f]">Manual Bank &amp; MOMO</h1>
-        <p className="mt-1 max-w-3xl text-sm text-[#78818d]">Create separate bank and mobile money ledgers for customer payments. These independent records do not create or change system transactions.</p>
+        <p className="mt-1 max-w-3xl text-sm text-[#78818d]">Create separate cash, bank, and mobile money ledgers for customer payments. These independent records do not create or change system transactions.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button asChild type="button" variant="outline"><Link href="/manual-momo/contacts">Manage contacts</Link></Button>
@@ -252,14 +254,23 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
 
     {error && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div>}
     {canWrite && <Card>
-      <CardHeader><CardTitle>Create an account ledger</CardTitle><p className="text-xs text-[#7c8793]">Set the account type, bank or telco, account details, and starting balance.</p></CardHeader>
+      <CardHeader><CardTitle>Create an account ledger</CardTitle><p className="text-xs text-[#7c8793]">Set the account type, account details when applicable, and starting balance.</p></CardHeader>
       <CardContent><form onSubmit={createAccount} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <label><span className={fieldLabelClass}>Account type</span><select value={newAccountForm.type} onChange={(event) => setNewAccountForm((current) => ({ ...current, type: event.target.value as AccountType }))} className={dateInputClass}>
-          <option value="BANK">Bank</option><option value="MOBILE_MONEY">Mobile Money</option>
+        <label><span className={fieldLabelClass}>Account type</span><select value={newAccountForm.type} onChange={(event) => {
+          const type = event.target.value as AccountType;
+          setNewAccountForm((current) => ({
+            ...current,
+            type,
+            ...(type === "CASH" ? { bankNameTelco: "", accountNumber: "" } : {}),
+          }));
+        }} className={dateInputClass}>
+          <option value="CASH">Cash</option><option value="BANK">Bank</option><option value="MOBILE_MONEY">Mobile Money</option>
         </select></label>
         <label><span className={fieldLabelClass}>Account name</span><input required minLength={2} maxLength={120} value={newAccountForm.name} onChange={(event) => setNewAccountForm((current) => ({ ...current, name: event.target.value }))} className={dateInputClass} /></label>
-        <label><span className={fieldLabelClass}>Bank Name/Telco</span><input required minLength={2} maxLength={120} value={newAccountForm.bankNameTelco} onChange={(event) => setNewAccountForm((current) => ({ ...current, bankNameTelco: event.target.value }))} className={dateInputClass} /></label>
-        <label><span className={fieldLabelClass}>{newAccountForm.type === "BANK" ? "Account number" : "MOMO number"}</span><input required maxLength={120} value={newAccountForm.accountNumber} onChange={(event) => setNewAccountForm((current) => ({ ...current, accountNumber: event.target.value }))} className={dateInputClass} /></label>
+        {newAccountForm.type !== "CASH" && <>
+          <label><span className={fieldLabelClass}>Bank Name/Telco</span><input required minLength={2} maxLength={120} value={newAccountForm.bankNameTelco} onChange={(event) => setNewAccountForm((current) => ({ ...current, bankNameTelco: event.target.value }))} className={dateInputClass} /></label>
+          <label><span className={fieldLabelClass}>{newAccountForm.type === "BANK" ? "Account number" : "MOMO number"}</span><input required maxLength={120} value={newAccountForm.accountNumber} onChange={(event) => setNewAccountForm((current) => ({ ...current, accountNumber: event.target.value }))} className={dateInputClass} /></label>
+        </>}
         <label><span className={fieldLabelClass}>Opening balance (GHS)</span><GhanaAmountInput min="0" step="0.01" value={newAccountForm.openingBalance} onChange={(openingBalance) => setNewAccountForm((current) => ({ ...current, openingBalance }))} className={dateInputClass} /></label>
         <div className="flex items-end"><Button type="submit" variant="gold" disabled={savingNewAccount || loading}>{savingNewAccount ? "Creating…" : "Create ledger"}</Button></div>
       </form></CardContent>
@@ -270,7 +281,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       <CardContent className="grid gap-4 md:grid-cols-2">
         {data?.accounts.map((account) => <div key={account.id} className="rounded-xl border border-[#e7eaee] p-3">
           <h2 className="mb-1 text-sm font-semibold text-[#17212f]">{account.name}</h2>
-          <p className="mb-3 text-xs text-[#7c8793]">{account.type === "BANK" ? "Bank" : "Mobile Money"} · {account.bankNameTelco || "No bank/telco name"} · {account.accountNumber || "No account number"}</p>
+          <p className="mb-3 text-xs text-[#7c8793]">{accountTypeLabel(account.type)}{account.bankNameTelco ? ` · ${account.bankNameTelco}` : ""}{account.accountNumber ? ` · ${account.accountNumber}` : ""}</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <label><span className={fieldLabelClass}>Opening balance (GHS)</span><GhanaAmountInput min="0" step="0.01" value={openingForms[account.id]?.openingBalance ?? "0"} onChange={(openingBalance) => setOpeningForms((current) => ({ ...current, [account.id]: { openingBalance } }))} className={dateInputClass} disabled={!canWrite || loading} /></label>
           </div>
@@ -290,14 +301,11 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
           <label><span className={fieldLabelClass}>Payment direction</span><select value={entryForm.direction} onChange={(event) => setEntryForm((current) => ({ ...current, direction: event.target.value as Direction }))} className={dateInputClass}>
             <option value="INBOUND">Received from customer</option><option value="OUTBOUND">Paid to customer</option>
           </select></label>
-          <label><span className={fieldLabelClass}>Saved contact (optional)</span><select value={selectedContactId} onChange={(event) => {
-            const contact = contacts.find((item) => item.id === event.target.value);
-            setSelectedContactId(event.target.value);
+          <div><span className={fieldLabelClass}>Saved contact (optional)</span><SavedContactAutocomplete id="manual-momo-saved-contact" contacts={contacts} value={selectedContactId} onChange={(contactId) => {
+            const contact = contacts.find((item) => item.id === contactId);
+            setSelectedContactId(contactId);
             if (contact) setEntryForm((current) => ({ ...current, customerName: contact.name, customerPhone: contact.phone ?? "" }));
-          }} className={dateInputClass}>
-            <option value="">Enter contact manually</option>
-            {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}{contact.phone ? ` · ${contact.phone}` : ""}</option>)}
-          </select></label>
+          }} /></div>
           <label><span className={fieldLabelClass}>Customer name</span><input required minLength={2} maxLength={120} value={entryForm.customerName} onChange={(event) => setEntryForm((current) => ({ ...current, customerName: event.target.value }))} className={dateInputClass} /></label>
           <label><span className={fieldLabelClass}>Customer phone (optional)</span><input maxLength={40} value={entryForm.customerPhone} onChange={(event) => setEntryForm((current) => ({ ...current, customerPhone: event.target.value }))} className={dateInputClass} /></label>
           <label><span className={fieldLabelClass}>Amount (GHS)</span><GhanaAmountInput required min="0.01" step="0.01" value={entryForm.amount} onChange={(amount) => setEntryForm((current) => ({ ...current, amount }))} className={dateInputClass} /></label>

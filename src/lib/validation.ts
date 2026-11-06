@@ -66,13 +66,20 @@ export const manualMomoAccountSchema = z.object({
 }).strict();
 
 export const manualMomoAccountCreateSchema = z.object({
-  type: z.enum(["BANK", "MOBILE_MONEY"]),
+  type: z.enum(["CASH", "BANK", "MOBILE_MONEY"]),
   name: z.string().trim().min(2).max(120),
-  bankNameTelco: z.string().trim().min(2, "Enter a bank or telco name").max(120),
-  accountNumber: z.string().trim().min(1).max(120),
+  bankNameTelco: z.string().trim().max(120).optional().or(z.literal("")),
+  accountNumber: z.string().trim().max(120).optional().or(z.literal("")),
   openingBalance: manualMomoMoney.refine((value) => Number(value) >= 0, "Opening balance cannot be negative"),
   openingDate: pastOrPresentDateTime("Opening date"),
-}).strict();
+}).strict().superRefine((account, context) => {
+  if (account.type !== "CASH" && !account.bankNameTelco) {
+    context.addIssue({ code: "custom", path: ["bankNameTelco"], message: "Enter a bank or telco name" });
+  }
+  if (account.type !== "CASH" && !account.accountNumber) {
+    context.addIssue({ code: "custom", path: ["accountNumber"], message: "Enter an account or MOMO number" });
+  }
+});
 
 export const tradeSchema = z.object({
   type: z.enum(["PURCHASE", "SALE"]),

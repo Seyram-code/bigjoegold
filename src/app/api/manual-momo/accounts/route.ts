@@ -14,8 +14,8 @@ export async function POST(request: Request) {
         data: {
           type: input.type,
           name: input.name,
-          bankNameTelco: input.bankNameTelco,
-          accountNumber: input.accountNumber,
+          bankNameTelco: input.type === "CASH" ? "" : input.bankNameTelco ?? "",
+          accountNumber: input.type === "CASH" ? null : input.accountNumber || null,
           openingBalance: new Prisma.Decimal(input.openingBalance),
           openingDate: new Date(input.openingDate),
           createdById: user.id,

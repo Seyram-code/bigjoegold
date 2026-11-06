@@ -18,6 +18,7 @@ enum CustomerKind {
 }
 
 enum ManualMomoAccountType {
+  CASH
   BANK
   MOBILE_MONEY
 }

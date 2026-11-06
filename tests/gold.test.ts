@@ -739,12 +739,10 @@ test("finance validation covers account metadata, movements, and optional approv
     }).success, false);
     assert.equal(manualMomoAccountCreateSchema.safeParse({
       type: "CASH",
-      name: "Current Account",
-      bankNameTelco: "GCB",
-      accountNumber: "123456789",
+      name: "Cash Drawer",
       openingBalance: "1000.00",
       openingDate: "2026-10-01T00:00:00.000Z",
-    }).success, false);
+    }).success, true);
     assert.equal(manualMomoAccountCreateSchema.safeParse({
       type: "BANK",
       name: "Current Account",

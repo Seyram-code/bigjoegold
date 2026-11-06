@@ -7,7 +7,7 @@ export type ManualMomoStatementAccount = {
 export type ManualMomoAccountSummary = ManualMomoStatementAccount & {
   id: string;
   name: string;
-  type: "BANK" | "MOBILE_MONEY";
+  type: "CASH" | "BANK" | "MOBILE_MONEY";
   bankNameTelco: string;
   accountNumber: string | null;
 };
