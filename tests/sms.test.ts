@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { paymentConfirmationSms, purchaseConfirmationSms, saleConfirmationSms, sendOwnerSms } from "../src/lib/sms";
+import {
+  loginNotificationSms,
+  manualMomoTransactionSms,
+  paymentConfirmationSms,
+  purchaseConfirmationSms,
+  saleConfirmationSms,
+  sendOwnerSms,
+} from "../src/lib/sms";
 
 test("purchase SMS identifies the completed purchase and its financial value", () => {
   const message = purchaseConfirmationSms({
@@ -23,6 +30,37 @@ test("sale and payment SMS messages identify their transaction context", () => {
   assert.match(payment, /PAY-1001/);
   assert.match(payment, /mobile money/);
   assert.match(payment, /SAL-1001/);
+});
+
+test("manual ledger transaction and login SMS include their record details", () => {
+  const manualEntry = manualMomoTransactionSms({
+    reference: "MM-1001",
+    direction: "OUTBOUND",
+    amount: "250.00",
+    accountName: "Main Cash",
+    accountType: "CASH",
+    customerName: "Ama Gold",
+    transactionReference: "TXN-77",
+    transactionDate: new Date("2026-11-06T12:15:00.000Z"),
+    recordedBy: "Joe",
+  });
+  const login = loginNotificationSms({
+    name: "Ama Staff",
+    email: "ama@example.com",
+    phone: "+233200000000",
+    role: "SALES_OFFICER",
+    loggedInAt: new Date("2026-11-06T12:15:00.000Z"),
+  });
+  assert.match(manualEntry, /MM-1001/);
+  assert.match(manualEntry, /250\.00/);
+  assert.match(manualEntry, /Main Cash/);
+  assert.match(manualEntry, /Ama Gold/);
+  assert.match(manualEntry, /TXN-77/);
+  assert.match(login, /Ama Staff/);
+  assert.match(login, /ama@example\.com/);
+  assert.match(login, /sales officer/);
+  assert.match(login, /\+233200000000/);
+  assert.match(login, /Time:/);
 });
 
 test("Wigal rejection logs bounded, redacted provider details", async (t) => {

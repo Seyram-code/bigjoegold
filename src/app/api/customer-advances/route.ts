@@ -8,7 +8,7 @@ import { recordCustomerAdvance } from "@/lib/customer-advances";
 import { customerAdvanceSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerTransactionEmail } from "@/lib/email";
-import { sendOwnerPaymentSms } from "@/lib/sms";
+import { saleConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
 
 export async function GET(request: Request) {
   try {
@@ -102,6 +102,14 @@ export async function POST(request: Request) {
       };
       const sale = await postSale(user, saleInput, input.requestId);
       after(async () => {
+        await sendOwnerSms(saleConfirmationSms({
+          reference: sale.reference,
+          customerName: sale.customer?.name,
+          quantityKg: sale.quantityKg.toString(),
+          totalAmount: sale.totalAmount.toString(),
+          amountPaid: sale.paymentAmount.toString(),
+          recordedBy: user.name,
+        }));
         await sendOwnerTransactionEmail({
           type: "SALE",
           reference: sale.reference,

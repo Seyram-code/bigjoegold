@@ -8,6 +8,8 @@ type FrogConfig = { apiKey: string; username: string; senderId: string; ownerPho
 type PurchaseSms = { reference: string; supplierName: string; quantityKg: string | number; totalAmount: string | number; amountPaid: string | number; recordedBy: string };
 type SaleSms = { reference: string; customerName?: string | null; quantityKg: string | number; totalAmount: string | number; amountPaid: string | number; recordedBy: string };
 type PaymentSms = { reference: string; direction: "INBOUND" | "OUTBOUND"; amount: string | number; method: string; customerName?: string | null; tradeReference?: string | null; recordedBy: string };
+type ManualMomoSms = { reference: string; direction: "INBOUND" | "OUTBOUND"; amount: string | number; accountName: string; accountType: string; customerName: string; transactionReference?: string | null; transactionDate: Date; recordedBy: string };
+type LoginSms = { name: string; email: string; phone: string | null; role: string; loggedInAt: Date };
 
 function required(value: string | undefined) { return value?.trim() ?? ""; }
 
@@ -30,6 +32,13 @@ function frogConfig(): FrogConfig | null {
 
 function compact(value: string) { return value.replace(/\s+/g, " ").trim(); }
 function paymentMethodLabel(method: string) { return method.replaceAll("_", " ").toLowerCase(); }
+function ghanaDateTime(value: Date) {
+  return new Intl.DateTimeFormat("en-GH", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Africa/Accra",
+  }).format(value);
+}
 
 function rejectionDetails(body: unknown, config: FrogConfig) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return {};
@@ -61,6 +70,38 @@ export function saleConfirmationSms(notification: SaleSms) {
 export function paymentConfirmationSms(notification: PaymentSms) {
   const subject = notification.tradeReference ? `for ${notification.tradeReference}` : notification.customerName ? `for ${notification.customerName}` : "";
   return compact(`BJG payment ${notification.reference} confirmed. ${notification.direction.toLowerCase()} ${formatCurrencyExact(notification.amount)} via ${paymentMethodLabel(notification.method)} ${subject}. By: ${notification.recordedBy}.`);
+}
+
+export function manualMomoTransactionSms(notification: ManualMomoSms) {
+  const transactionReference = notification.transactionReference
+    ? ` Transaction ref: ${notification.transactionReference}.`
+    : "";
+  return compact(`BJG Manual Bank & MOMO ${notification.direction.toLowerCase()} ${notification.reference}: ${formatCurrencyExact(notification.amount)} on ${notification.accountName} (${paymentMethodLabel(notification.accountType)}). Customer: ${notification.customerName}.${transactionReference} Date: ${ghanaDateTime(notification.transactionDate)}. By: ${notification.recordedBy}.`);
+}
+
+export function loginNotificationSms(notification: LoginSms) {
+  const phone = notification.phone ? ` Phone: ${notification.phone}.` : "";
+  return compact(`BJG login. ${notification.name} (${notification.role.replaceAll("_", " ").toLowerCase()}). Email: ${notification.email}.${phone} Time: ${ghanaDateTime(notification.loggedInAt)}.`);
+}
+
+export async function sendOwnerLoginSms(userId: string, loggedInAt: Date) {
+  try {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { name: true, email: true, phone: true, role: true },
+    });
+    await sendOwnerSms(loginNotificationSms({ ...user, loggedInAt }));
+  } catch (error) {
+    console.error("Successful login was recorded, but its owner SMS could not be prepared.", error);
+  }
+}
+
+export async function sendOwnerManualMomoSms(notification: ManualMomoSms) {
+  try {
+    await sendOwnerSms(manualMomoTransactionSms(notification));
+  } catch (error) {
+    console.error("Manual Bank & MOMO transaction was recorded, but its owner SMS could not be prepared.", error);
+  }
 }
 
 export async function sendOwnerPaymentSms(paymentId: string, recordedBy: string) {

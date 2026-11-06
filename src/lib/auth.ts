@@ -1,10 +1,12 @@
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { after } from "next/server";
 import { addAudit } from "@/lib/records";
 import { clearLoginFailures, getLoginLock } from "@/lib/login-lockout";
 import { prisma } from "@/lib/prisma";
 import { sendOwnerPasswordResetEmail } from "@/lib/email";
+import { sendOwnerLoginSms } from "@/lib/sms";
 
 const secret = process.env.BETTER_AUTH_SECRET;
 if (!secret || secret.length < 32) {
@@ -71,6 +73,35 @@ export const auth = betterAuth({
           });
         }
       }
+    }),
+    after: createAuthMiddleware(async (context) => {
+      if (context.path !== "/sign-in/email") return;
+
+      const returned = context.context.returned;
+      if (returned instanceof APIError) return;
+      if (returned instanceof Response && !returned.ok) return;
+
+      let payload: unknown = returned;
+      if (returned instanceof Response) {
+        try {
+          payload = await returned.clone().json();
+        } catch (error) {
+          console.error("Successful sign-in response could not be read for its owner SMS.", error);
+          return;
+        }
+      }
+      if (typeof payload !== "object" || payload === null || !("user" in payload)) return;
+      const signedInUser = payload.user;
+      if (typeof signedInUser !== "object" || signedInUser === null || !("id" in signedInUser) || typeof signedInUser.id !== "string") {
+        console.error("Successful sign-in response did not include a valid user ID for its owner SMS.");
+        return;
+      }
+
+      const signedInUserId = signedInUser.id;
+      const loggedInAt = new Date();
+      after(async () => {
+        await sendOwnerLoginSms(signedInUserId, loggedInAt);
+      });
     }),
   },
   emailAndPassword: {

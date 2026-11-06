@@ -1,8 +1,10 @@
 import { PaymentDirection, Prisma } from "@prisma/client";
+import { after } from "next/server";
 import { requireUser } from "@/lib/authz";
 import { apiError, HttpError, readJson } from "@/lib/http";
 import { addAudit, reference } from "@/lib/records";
 import { prisma } from "@/lib/prisma";
+import { sendOwnerManualMomoSms } from "@/lib/sms";
 import { manualMomoEntrySchema } from "@/lib/validation";
 
 function parseDateRange(url: URL) {
@@ -132,6 +134,20 @@ export async function POST(request: Request) {
         },
       });
       return created;
+    });
+
+    after(async () => {
+      await sendOwnerManualMomoSms({
+        reference: entry.reference,
+        direction: entry.direction,
+        amount: entry.amount.toString(),
+        accountName: account.name,
+        accountType: account.type,
+        customerName: entry.customerName,
+        transactionReference: entry.transactionReference,
+        transactionDate: entry.transactionDate,
+        recordedBy: user.name,
+      });
     });
 
     return Response.json({ ...entry, amount: entry.amount.toNumber() }, { status: 201 });

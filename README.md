@@ -23,7 +23,7 @@ Do not commit `.env` or use example credentials outside a throwaway local setup.
 
 ### Owner SMS notifications
 
-To send operational notifications to the owner, create a Wigal FROG account and set `WIGAL_FROG_API_KEY`, `WIGAL_FROG_USERNAME`, `WIGAL_FROG_SENDER_ID`, and `WIGAL_FROG_OWNER_PHONE` in `.env`. The phone setting accepts one number or a comma-separated list (for example, `+233XXXXXXXXX,+233YYYYYYYYY`). The sender ID must be approved by FROG. Once configured, the app sends each recipient a confirmation after a completed purchase, a posted sale, and a payment recorded from the Payments area. SMS delivery is best-effort and cannot roll back a completed business transaction.
+To send operational notifications to the owner, create a Wigal FROG account and set `WIGAL_FROG_API_KEY`, `WIGAL_FROG_USERNAME`, `WIGAL_FROG_SENDER_ID`, and `WIGAL_FROG_OWNER_PHONE` in `.env`. The phone setting accepts one number or a comma-separated list (for example, `+233XXXXXXXXX,+233YYYYYYYYY`). The sender ID must be approved by FROG. Once configured, the app sends each recipient an SMS after a completed purchase or sale, recorded payment, Manual Bank & MOMO transaction, supplier advance or customer financing payment, and successful user login. Login alerts include the user's name, email, role, phone (if set), and Ghana-local login time. SMS delivery is best-effort and cannot roll back a completed business transaction or block login.
 
 ### Owner email notifications and password recovery
 
