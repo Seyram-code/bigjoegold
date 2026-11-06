@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import {
-  Activity, ArrowDownToLine, ArrowLeftRight, BarChart3, Building2, ChevronDown, ChevronRight,
+  Activity, ArrowDownToLine, ArrowLeftRight, BarChart3, Building2, ChevronDown, ChevronRight, Clock3,
   CircleDollarSign, Coins, Eye, EyeOff, LayoutDashboard, LogOut, Menu, Package, Settings2,
   ShieldCheck, Users, WalletCards, X,
 } from "lucide-react";
@@ -12,12 +12,14 @@ import { useEffect, useRef, useState } from "react";
 import { MarketPriceIndicator, NotificationsButton } from "@/components/header-tools";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { workspaceNavigation, type NavigationItem } from "@/lib/workspace-navigation";
 
 type Role = "OWNER" | "MANAGER" | "GOLD_RECEIVER" | "SALES_OFFICER" | "INVENTORY_OFFICER" | "TRADER" | "ACCOUNTANT" | "AUDITOR" | "VIEWER";
 type Permissions = Record<"dashboard" | "customers" | "trades" | "inventory" | "payments" | "reports" | "board" | "staff" | "audit" | "settings", boolean>;
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+const INACTIVITY_WARNING_MS = 30 * 1000;
 
 export function WorkspaceShell({
   children,
@@ -47,6 +49,10 @@ export function WorkspaceShell({
   const [profileNotice, setProfileNotice] = useState("");
   const profileRef = useRef<HTMLDivElement>(null);
   const [signOutError, setSignOutError] = useState("");
+  const [inactivityWarningSeconds, setInactivityWarningSeconds] = useState<number | null>(null);
+  const stayLoggedInRef = useRef<() => void>(() => {});
+  const stayLoggedInButtonRef = useRef<HTMLButtonElement>(null);
+  const isInactivityWarningVisible = inactivityWarningSeconds !== null;
   const visibleNavigation = filterNavigation(workspaceNavigation, permissions);
 
   useEffect(() => {
@@ -73,18 +79,27 @@ export function WorkspaceShell({
       timeout = undefined;
       const remaining = INACTIVITY_TIMEOUT_MS - (Date.now() - lastActivityAt);
       if (remaining <= 0) {
+        setInactivityWarningSeconds(null);
         void signOutAfterInactivity();
         return;
       }
-      timeout = window.setTimeout(checkInactivity, remaining);
+      if (remaining <= INACTIVITY_WARNING_MS) {
+        setInactivityWarningSeconds(Math.ceil(remaining / 1000));
+        timeout = window.setTimeout(checkInactivity, Math.min(1000, remaining));
+        return;
+      }
+      setInactivityWarningSeconds(null);
+      timeout = window.setTimeout(checkInactivity, remaining - INACTIVITY_WARNING_MS);
     };
 
     const recordActivity = () => {
       if (signingOut) return;
       lastActivityAt = Date.now();
+      setInactivityWarningSeconds(null);
       if (timeout !== undefined) window.clearTimeout(timeout);
-      timeout = window.setTimeout(checkInactivity, INACTIVITY_TIMEOUT_MS);
+      timeout = window.setTimeout(checkInactivity, INACTIVITY_TIMEOUT_MS - INACTIVITY_WARNING_MS);
     };
+    stayLoggedInRef.current = recordActivity;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") checkInactivity();
@@ -93,14 +108,19 @@ export function WorkspaceShell({
     const activityEvents: (keyof WindowEventMap)[] = ["keydown", "pointerdown", "touchstart", "wheel", "scroll"];
     activityEvents.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }));
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    timeout = window.setTimeout(checkInactivity, INACTIVITY_TIMEOUT_MS);
+    timeout = window.setTimeout(checkInactivity, INACTIVITY_TIMEOUT_MS - INACTIVITY_WARNING_MS);
 
     return () => {
       if (timeout !== undefined) window.clearTimeout(timeout);
+      stayLoggedInRef.current = () => {};
       activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity));
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [router, user.id]);
+
+  useEffect(() => {
+    if (isInactivityWarningVisible) stayLoggedInButtonRef.current?.focus();
+  }, [isInactivityWarningVisible]);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -186,6 +206,19 @@ export function WorkspaceShell({
   return (
     <div className="min-h-screen bg-[#f7f8fa]">
       <AlertDialog open={Boolean(signOutError)} title="Sign-out error" description={signOutError} onConfirm={() => setSignOutError("")} />
+      {inactivityWarningSeconds !== null && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0c1521]/55 p-4 backdrop-blur-[2px]">
+        <section role="alertdialog" aria-modal="true" aria-labelledby="inactivity-warning-title" aria-describedby="inactivity-warning-description" className="w-full max-w-md rounded-2xl border border-[#e8ebef] bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,.24)]">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600"><Clock3 size={19} /></div>
+          <h2 id="inactivity-warning-title" className="mt-4 text-base font-semibold text-[#17212f]">Still there?</h2>
+          <p id="inactivity-warning-description" className="mt-2 text-sm leading-6 text-[#74808d]">
+            You will be signed out in <span className="font-semibold text-[#17212f]">{inactivityWarningSeconds} seconds</span> due to inactivity.
+          </p>
+          <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row">
+            <Button type="button" variant="outline" onClick={signOut}>Sign out now</Button>
+            <Button ref={stayLoggedInButtonRef} type="button" variant="gold" onClick={() => stayLoggedInRef.current()}>Stay logged in</Button>
+          </div>
+        </section>
+      </div>}
       <aside aria-label="Main navigation" className="print-hide peer/sidebar group/sidebar fixed inset-y-0 left-0 z-40 hidden w-14 flex-col overflow-hidden border-r border-white/[.06] bg-[#0d1825] pt-16 shadow-[8px_0_24px_rgba(13,24,37,.12)] transition-[width] duration-200 ease-out hover:w-[230px] lg:flex">
         <nav className="scrollbar-hide flex-1 space-y-1 overflow-x-hidden overflow-y-auto px-1.5 py-4">
           <NavigationLinks items={visibleNavigation} pathname={pathname} />
