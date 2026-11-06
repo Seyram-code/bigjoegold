@@ -44,7 +44,7 @@ export function StockAutocomplete({
     const matches = normalized
       ? lots.filter((lot) => optionLabel(lot).toLocaleLowerCase().includes(normalized))
       : lots;
-    return matches.slice(0, 50);
+    return matches;
   }, [lots, query]);
 
   useEffect(() => {
@@ -121,6 +121,7 @@ export function StockAutocomplete({
         <ChevronDown aria-hidden="true" size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[#98a2ae]" />
       </div>
       {open && <div className="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-[#dfe4e9] bg-white p-1 shadow-lg">
+        {results.length > 0 && <p className="px-3 py-2 text-[10px] text-[#89929d]">{results.length} available {results.length === 1 ? "batch" : "batches"} · scroll to browse</p>}
         <ul id={`${id}-options`} role="listbox" aria-label="Stock batches">
           {results.map((lot, index) => <li key={lot.id}>
             <button
