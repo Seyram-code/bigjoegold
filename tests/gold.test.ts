@@ -15,6 +15,7 @@ import { inventoryMovementSchema } from "../src/lib/validation";
 import { ledgerBalances, movementBalance } from "../src/lib/inventory";
 import { createBatchCode } from "../src/lib/records";
 import { calculateCashBalances, calculateRunningCashBalances } from "../src/lib/finance";
+import { adjustSaleAllocations } from "../src/lib/sales-allocation";
 import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoAccountSummaries, buildManualMomoStatement } from "../src/lib/manual-momo";
 import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "../src/lib/reporting";
@@ -498,6 +499,35 @@ test("FIFO planning reports the exact uncovered weight without over-allocating",
 
   assert.equal(plan.allocations[0].grams.toNumber(), 500);
   assert.equal(plan.remainingGrams.toNumber(), 250);
+});
+
+test("editing sale top weight spreads allocation changes across selected batches", () => {
+  const allocations = [
+    { lotId: "older", grams: "60" },
+    { lotId: "newer", grams: "40" },
+  ];
+  const lots = [
+    { id: "older", remainingGrams: "100" },
+    { id: "newer", remainingGrams: "100" },
+  ];
+
+  assert.deepEqual(adjustSaleAllocations(allocations, lots, "80"), [
+    { lotId: "older", grams: "48.00000" },
+    { lotId: "newer", grams: "32.00000" },
+  ]);
+  assert.deepEqual(adjustSaleAllocations(allocations, lots, "150"), [
+    { lotId: "older", grams: "90.00000" },
+    { lotId: "newer", grams: "60.00000" },
+  ]);
+  assert.deepEqual(adjustSaleAllocations(allocations, [
+    { id: "older", remainingGrams: "70" },
+    { id: "newer", remainingGrams: "100" },
+  ], "150"), [
+    { lotId: "older", grams: "70.00000" },
+    { lotId: "newer", grams: "80.00000" },
+  ]);
+  assert.throws(() => adjustSaleAllocations(allocations, lots, "250"), /exceeds the available stock/);
+  assert.throws(() => adjustSaleAllocations(allocations, lots, "80.000001"), /no more than 5 decimal places/);
 });
 
 test("sale quote calculates pure-weight value with pesewa-safe discount handling", () => {

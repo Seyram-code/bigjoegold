@@ -76,7 +76,7 @@ export async function GET() {
   try {
     const user = await requireUser("payments:read");
     const branchAccount = await ensureBranchAccountSafely(user.id);
-    const [movements, accountMovements, pendingOutflows, accounts, formulaConfig] = await Promise.all([
+    const [movements, accountMovements, pendingOutflows, accounts, formulaConfig, goldTotals] = await Promise.all([
       prisma.cashMovement.findMany({
         where: { accountId: branchAccount.id },
         orderBy: [{ movementDate: "desc" }, { createdAt: "desc" }],
@@ -119,6 +119,14 @@ export async function GET() {
         select: { id: true, name: true, type: true },
       }),
       prisma.purchaseFormulaConfig.findUnique({ where: { id: "default" } }),
+      prisma.trade.aggregate({
+        where: {
+          type: "PURCHASE",
+          status: "POSTED",
+          purchaseMeasurement: { is: { calculationSource: "MANSO_MANUAL_COST" } },
+        },
+        _sum: { quantityKg: true, totalAmount: true },
+      }),
     ]);
     const balances = calculateCashBalances(accountMovements);
     const runningBalances = calculateRunningCashBalances(accountMovements);
@@ -126,6 +134,10 @@ export async function GET() {
     return Response.json({
       account: { id: branchAccount.id, name: branchAccount.name, balance: (balances.get(branchAccount.id) ?? zero()).toFixed(2) },
       availableBalance: (balances.get(branchAccount.id) ?? zero()).minus(pendingAmount).toFixed(2),
+      goldTotals: {
+        quantityKg: (goldTotals._sum.quantityKg ?? zero()).toFixed(3),
+        value: (goldTotals._sum.totalAmount ?? zero()).toFixed(2),
+      },
       accounts,
       movements: movements.map((movement) => ({
         ...movement,

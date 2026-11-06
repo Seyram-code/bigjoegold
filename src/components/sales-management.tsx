@@ -19,6 +19,7 @@ import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { SearchInput } from "@/components/ui/search-input";
 import { calculateMeasuredSaleQuote, inferSaleDownWeightFromReceipts } from "@/lib/gold";
+import { adjustSaleAllocations } from "@/lib/sales-allocation";
 import { formatCurrency, formatPriceAmount, formatTwoDecimalTruncated, formatWeight } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { DEFAULT_PURCHASE_FORMULA_RULES, type PurchaseFormulaRules } from "@/lib/purchase-formula";
@@ -123,6 +124,21 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
       return { result: null, error: cause instanceof Error ? cause.message : "Check the entered gold measurements" };
     }
   }, [measurementTopGrams, measurementDownGrams, boardPrice, pricePerGram, discountAmount, formulaRules]);
+  const allocationAdjustment = useMemo(() => {
+    if (!allocations.length || !measurement.result) return { allocations: null, error: "" };
+    try {
+      return {
+        allocations: adjustSaleAllocations(
+          allocations,
+          lots.map((lot) => ({ id: lot.id, remainingGrams: lot.remainingGrams })),
+          measurementTopGrams,
+        ),
+        error: "",
+      };
+    } catch (cause) {
+      return { allocations: null, error: cause instanceof Error ? cause.message : "The selected batches cannot cover this top weight" };
+    }
+  }, [allocations, lots, measurement.result, measurementTopGrams]);
   const weightedPurityBps = measurement.result?.purityBps ?? null;
   const quote = useMemo(() => {
     if (!measurementConfirmed || !allocations.length || !measurement.result
@@ -592,8 +608,8 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
           <button type="button" onClick={() => setMeasurementModalOpen(false)} aria-label="Close gold measurement" className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6]"><X size={16} /></button>
         </div>
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <FormField label="Top weight (g)" htmlFor="sale-measurement-top" hint="Must match the total grams allocated from stock batches.">
-            <input id="sale-measurement-top" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementTopGrams} onChange={(event) => { setMeasurementTopGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
+          <FormField label="Top weight (g)" htmlFor="sale-measurement-top" hint="Editing this updates the sale weight and spreads the allocation across selected batches, up to their available stock.">
+            <input id="sale-measurement-top" type="number" min="0.00001" step="0.00001" max="999999.99999" value={measurementTopGrams} onChange={(event) => { setMeasurementTopGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
           </FormField>
           <FormField label="Down weight (g)" htmlFor="sale-measurement-down" hint="Auto-filled from the receiving measurements of selected batches; partial batches are scaled. You can adjust it if you remeasure.">
             <input id="sale-measurement-down" type="number" min="0.01" step="0.01" max="999999.99" value={measurementDownGrams} onChange={(event) => { setMeasurementDownGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
@@ -604,10 +620,16 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
           <FormField label="Purity (calculated)" htmlFor="sale-measurement-purity"><input id="sale-measurement-purity" readOnly value={measurement.result ? `${formatTwoDecimalTruncated(measurement.result.purity.toString())}%` : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
         </div>
         {measurement.error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{measurement.error}</p>}
-        {measurement.result && !measurement.result.topGrams.equals(allocatedGramsDecimal) && <p role="alert" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Measured top weight ({formatWeight(measurement.result.topGrams.toString(), "g", 5)}) must exactly match the allocated stock weight ({formatWeight(allocatedGramsDecimal.toString(), "g", 5)}).</p>}
+        {allocationAdjustment.error && <p role="alert" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{allocationAdjustment.error}</p>}
         <div className="sale-measurement-price mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d6aa42] bg-[#fff7df] p-4">
           <div><p className="text-[10px] font-semibold uppercase tracking-wide text-[#795719]">Calculated sale price</p><p className="mt-1 text-2xl font-bold tabular-nums text-[#17212f]">{measurement.result ? formatCurrency(measurement.result.total.toNumber()) : "—"}</p><p className="mt-1 text-[10px] text-[#637083]">{boardPrice ? `Selling board price: ${formatPriceAmount(pricePerGram, "GHS")} per pure gram` : "No compatible selling board price available"}</p></div>
-          <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => setMeasurementModalOpen(false)}>Cancel</Button><Button type="button" variant="gold" disabled={!measurement.result || !allocations.length || !measurement.result.topGrams.equals(allocatedGramsDecimal)} onClick={() => { setMeasurementConfirmed(true); setMeasurementModalOpen(false); }}><Check size={15} /> Apply measurements</Button></div>
+          <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => setMeasurementModalOpen(false)}>Cancel</Button><Button type="button" variant="gold" disabled={!measurement.result || !allocationAdjustment.allocations} onClick={() => {
+            if (!allocationAdjustment.allocations || !measurement.result) return;
+            setAllocations(allocationAdjustment.allocations);
+            setMeasurementTopGrams(measurement.result.topGrams.toFixed(5));
+            setMeasurementConfirmed(true);
+            setMeasurementModalOpen(false);
+          }}><Check size={15} /> Apply measurements</Button></div>
         </div>
       </section>
     </div>}

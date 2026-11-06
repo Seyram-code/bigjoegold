@@ -15,6 +15,7 @@ import type { PurchaseFormulaRules } from "@/lib/purchase-formula";
 type MansoData = {
   account: { id: string; name: string; balance: string };
   availableBalance: string;
+  goldTotals: { quantityKg: string; value: string };
   accounts: Array<{ id: string; name: string; type: string }>;
   formula: PurchaseFormulaRules;
   movements: Array<{
@@ -198,10 +199,23 @@ export function MansoBranchManagement({
       </Button>
     </div>
 
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Metric label="Funds currently at Manso" value={formatCurrency(branchBalance)} />
       <Metric label="Branch account" value={data?.account.name ?? "Loading…"} />
       <Metric label="Recent ledger entries" value={String(data?.movements.length ?? 0)} />
+      <Card><CardContent>
+        <p className="pt-4 text-xs font-medium text-[#788391]">Gold recorded from Manso</p>
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[10px] font-medium text-[#89929d]">Total weight</p>
+            <p className="mt-1 break-words text-lg font-bold text-[#17212f]">{Number(data?.goldTotals.quantityKg ?? 0).toLocaleString("en-GH", { maximumFractionDigits: 3 })} kg</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-medium text-[#89929d]">Recorded value</p>
+            <p className="mt-1 break-words text-lg font-bold text-[#17212f]">{formatCurrency(Number(data?.goldTotals.value ?? 0))}</p>
+          </div>
+        </div>
+      </CardContent></Card>
     </div>
 
     {loading && !data ? <p className="py-8 text-center text-sm text-[#697584]">Loading Manso branch records…</p> : <>
