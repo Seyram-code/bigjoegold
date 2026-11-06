@@ -372,14 +372,14 @@ export const mansoBranchActionSchema = z.discriminatedUnion("action", [
     cashAccountId: z.string().trim().min(1).max(191),
     amount: mansoMoney,
     movementDate: pastOrPresentDateTime("Movement date"),
-    description: z.string().trim().min(3).max(500),
+    description: optionalText,
   }).strict(),
   z.object({
     action: z.literal("RETURN"),
     cashAccountId: z.string().trim().min(1).max(191),
     amount: mansoMoney,
     movementDate: pastOrPresentDateTime("Movement date"),
-    description: z.string().trim().min(3).max(500),
+    description: optionalText,
   }).strict(),
   z.object({
     action: z.literal("RECEIVE_GOLD"),

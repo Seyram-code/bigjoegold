@@ -160,7 +160,8 @@ export async function POST(request: Request) {
         }
         const group = reference("TRF");
         const movementDate = new Date(input.movementDate);
-        const description = input.description.trim();
+        const description = input.description?.trim()
+          || (input.action === "ADVANCE" ? "Advance to Manso" : "Cash returned from Manso");
         const sourceMovement = await tx.cashMovement.create({
           data: {
             reference: reference("FIN"),

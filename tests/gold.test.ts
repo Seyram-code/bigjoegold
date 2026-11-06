@@ -78,6 +78,17 @@ test("Manso branch gold receipt requires an actual cost and measured weights", (
   assert.equal(missingCost.success, false);
 });
 
+test("Manso fund transfers accept an optional reason or reference", () => {
+  const transfer = mansoBranchActionSchema.safeParse({
+    action: "ADVANCE",
+    cashAccountId: "company-account",
+    amount: "1000",
+    movementDate: new Date().toISOString(),
+    description: "",
+  });
+  assert.equal(transfer.success, true);
+});
+
 test("advance gold fulfillment uses the current price for the released grams", () => {
   const fulfillmentValue = calculateTradeAmount(4, 10000, 11259).total;
   assert.equal(fulfillmentValue.toFixed(2), "45036000.00");

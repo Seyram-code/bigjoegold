@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormE
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { CalendarPicker } from "@/components/ui/calendar-picker";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { useToast } from "@/components/ui/toast-provider";
@@ -177,7 +178,14 @@ export function MansoBranchManagement({
   const branchBalance = Number(data?.account.balance ?? 0);
   const availableBalance = Number(data?.availableBalance ?? 0);
 
-  return <div className="space-y-5">
+  return <>
+    <AlertDialog
+      open={Boolean(error)}
+      title="Manso branch error"
+      description={error}
+      onConfirm={() => setError("")}
+    />
+    <div className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <p className="text-xs font-medium text-[#788391]">Workspace / Manso Branch</p>
@@ -188,8 +196,6 @@ export function MansoBranchManagement({
         <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} /> Refresh
       </Button>
     </div>
-
-    {error && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div>}
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       <Metric label="Funds currently at Manso" value={formatCurrency(branchBalance)} />
@@ -230,8 +236,8 @@ export function MansoBranchManagement({
               <FormField label="Date" htmlFor="manso-funds-date">
                 <CalendarPicker id="manso-funds-date" includeTime max={localDateTime()} required value={fundsForm.movementDate} onChange={(movementDate) => setFundsForm({ ...fundsForm, movementDate })} />
               </FormField>
-              <FormField label="Reason / reference" htmlFor="manso-funds-description" className="sm:col-span-2">
-                <input id="manso-funds-description" required minLength={3} maxLength={500} value={fundsForm.description} onChange={(event) => setFundsForm({ ...fundsForm, description: event.target.value })} className={fieldControlClass} placeholder={fundsAction === "ADVANCE" ? "e.g. Weekly buying funds" : "e.g. Unused balance returned"} />
+              <FormField label="Reason / reference (optional)" htmlFor="manso-funds-description" className="sm:col-span-2">
+                <input id="manso-funds-description" maxLength={500} value={fundsForm.description} onChange={(event) => setFundsForm({ ...fundsForm, description: event.target.value })} className={fieldControlClass} placeholder={fundsAction === "ADVANCE" ? "e.g. Weekly buying funds" : "e.g. Unused balance returned"} />
               </FormField>
               <div className="sm:col-span-2"><Button type="submit" disabled={busy || !fundsForm.cashAccountId}>{busy ? "Saving…" : fundsAction === "ADVANCE" ? "Send advance" : "Record cash return"}</Button></div>
             </form>
@@ -353,7 +359,8 @@ export function MansoBranchManagement({
         </CardContent>
       </Card>
     </>}
-  </div>;
+    </div>
+  </>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
