@@ -24,6 +24,7 @@ type MansoData = {
     direction: "INBOUND" | "OUTBOUND";
     amount: string;
     movementDate: string;
+    runningBalance: string;
     description: string | null;
     approvalStatus: string;
     createdBy: { name: string };
@@ -332,7 +333,7 @@ export function MansoBranchManagement({
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-left text-xs">
-              <thead><tr className="border-b border-[#e8ebef] text-[#788391]"><th className="px-3 py-2">Date</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Activity</th><th className="px-3 py-2">Details</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Amount</th><th className="px-3 py-2">Recorded by</th></tr></thead>
+              <thead><tr className="border-b border-[#e8ebef] text-[#788391]"><th className="px-3 py-2">Date</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Activity</th><th className="px-3 py-2">Details</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Amount</th><th className="px-3 py-2 text-right">Balance</th><th className="px-3 py-2">Recorded by</th></tr></thead>
               <tbody>
                 {data?.movements.map((movement) => {
                   const trade = movement.payment?.trade;
@@ -349,10 +350,11 @@ export function MansoBranchManagement({
                     <td className="max-w-[360px] truncate px-3 py-3" title={details}>{details}</td>
                     <td className="px-3 py-3">{movement.approvalStatus === "PENDING" ? "Pending approval" : movement.approvalStatus}</td>
                     <td className={`px-3 py-3 text-right font-semibold ${movement.direction === "INBOUND" ? "text-emerald-700" : "text-[#263241]"}`}>{movement.direction === "INBOUND" ? "+" : "−"}{formatCurrency(Number(movement.amount))}</td>
+                    <td className="whitespace-nowrap px-3 py-3 text-right font-semibold">{formatCurrency(Number(movement.runningBalance))}</td>
                     <td className="px-3 py-3">{movement.createdBy.name}</td>
                   </tr>;
                 })}
-                {!data?.movements.length && <tr><td colSpan={7} className="px-3 py-8 text-center text-[#788391]">No branch account activity yet. Send the first advance to Manso to begin tracking.</td></tr>}
+                {!data?.movements.length && <tr><td colSpan={8} className="px-3 py-8 text-center text-[#788391]">No branch account activity yet. Send the first advance to Manso to begin tracking.</td></tr>}
               </tbody>
             </table>
           </div>

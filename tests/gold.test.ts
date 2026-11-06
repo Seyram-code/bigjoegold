@@ -14,7 +14,7 @@ import { boardPriceSchema } from "../src/lib/validation";
 import { inventoryMovementSchema } from "../src/lib/validation";
 import { ledgerBalances, movementBalance } from "../src/lib/inventory";
 import { createBatchCode } from "../src/lib/records";
-import { calculateCashBalances } from "../src/lib/finance";
+import { calculateCashBalances, calculateRunningCashBalances } from "../src/lib/finance";
 import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoAccountSummaries, buildManualMomoStatement } from "../src/lib/manual-momo";
 import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "../src/lib/reporting";
@@ -599,6 +599,41 @@ test("finance cash balances derive from approved immutable movements", () => {
   ]);
   assert.equal(balances.get("cash")?.toFixed(2), "425.15");
   assert.equal(balances.has("bank"), false);
+});
+
+test("finance running balances follow transaction date and exclude unapproved movements", () => {
+  const balances = calculateRunningCashBalances([
+    {
+      id: "return",
+      accountId: "manso",
+      direction: "OUTBOUND",
+      amount: new Prisma.Decimal("50"),
+      approvalStatus: "NOT_REQUIRED",
+      movementDate: new Date("2026-11-02T12:00:00Z"),
+      createdAt: new Date("2026-11-03T12:00:00Z"),
+    },
+    {
+      id: "advance",
+      accountId: "manso",
+      direction: "INBOUND",
+      amount: new Prisma.Decimal("100"),
+      approvalStatus: "NOT_REQUIRED",
+      movementDate: new Date("2026-11-01T12:00:00Z"),
+      createdAt: new Date("2026-11-03T12:00:00Z"),
+    },
+    {
+      id: "pending",
+      accountId: "manso",
+      direction: "OUTBOUND",
+      amount: new Prisma.Decimal("20"),
+      approvalStatus: "PENDING",
+      movementDate: new Date("2026-11-03T12:00:00Z"),
+      createdAt: new Date("2026-11-03T12:00:00Z"),
+    },
+  ]);
+  assert.equal(balances.get("advance")?.toFixed(2), "100.00");
+  assert.equal(balances.get("return")?.toFixed(2), "50.00");
+  assert.equal(balances.get("pending")?.toFixed(2), "50.00");
 });
 
 test("finance validation covers account metadata, movements, and optional approval thresholds", () => {

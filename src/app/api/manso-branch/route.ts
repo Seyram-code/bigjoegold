@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { can, requireUser } from "@/lib/authz";
 import { apiError, HttpError, readJson } from "@/lib/http";
-import { calculateCashBalances, recordPaymentMovement } from "@/lib/finance";
+import { calculateCashBalances, calculateRunningCashBalances, recordPaymentMovement } from "@/lib/finance";
 import { calculateMansoBranchPurchase } from "@/lib/manso-branch";
 import { resolveStorageLocation } from "@/lib/inventory";
 import { addAudit, generateBatchNumber, reference } from "@/lib/records";
@@ -99,7 +99,15 @@ export async function GET() {
       }),
       prisma.cashMovement.findMany({
         where: { accountId: branchAccount.id },
-        select: { accountId: true, direction: true, amount: true, approvalStatus: true },
+        select: {
+          id: true,
+          accountId: true,
+          direction: true,
+          amount: true,
+          approvalStatus: true,
+          movementDate: true,
+          createdAt: true,
+        },
       }),
       prisma.cashMovement.findMany({
         where: { accountId: branchAccount.id, approvalStatus: "PENDING", direction: "OUTBOUND" },
@@ -113,12 +121,16 @@ export async function GET() {
       prisma.purchaseFormulaConfig.findUnique({ where: { id: "default" } }),
     ]);
     const balances = calculateCashBalances(accountMovements);
+    const runningBalances = calculateRunningCashBalances(accountMovements);
     const pendingAmount = pendingOutflows.reduce((sum, movement) => sum.plus(movement.amount), zero());
     return Response.json({
       account: { id: branchAccount.id, name: branchAccount.name, balance: (balances.get(branchAccount.id) ?? zero()).toFixed(2) },
       availableBalance: (balances.get(branchAccount.id) ?? zero()).minus(pendingAmount).toFixed(2),
       accounts,
-      movements,
+      movements: movements.map((movement) => ({
+        ...movement,
+        runningBalance: runningBalances.get(movement.id)?.toFixed(2) ?? "0.00",
+      })),
       formula: purchaseFormulaRules(formulaConfig),
     });
   } catch (error) {

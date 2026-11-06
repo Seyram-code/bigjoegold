@@ -48,3 +48,32 @@ export function calculateCashBalances(
   }
   return balances;
 }
+
+export function calculateRunningCashBalances(
+  movements: Array<{
+    id: string;
+    accountId: string;
+    direction: PaymentDirection;
+    amount: Prisma.Decimal;
+    approvalStatus: string;
+    movementDate: Date;
+    createdAt: Date;
+  }>,
+) {
+  const balances = new Map<string, Prisma.Decimal>();
+  const runningBalances = new Map<string, Prisma.Decimal>();
+  const orderedMovements = [...movements].sort((a, b) =>
+    a.movementDate.getTime() - b.movementDate.getTime()
+    || a.createdAt.getTime() - b.createdAt.getTime()
+    || a.id.localeCompare(b.id));
+
+  for (const movement of orderedMovements) {
+    const balance = balances.get(movement.accountId) ?? new Prisma.Decimal(0);
+    if (["NOT_REQUIRED", "APPROVED"].includes(movement.approvalStatus)) {
+      const amount = movement.direction === "INBOUND" ? movement.amount : movement.amount.negated();
+      balances.set(movement.accountId, balance.plus(amount));
+    }
+    runningBalances.set(movement.id, balances.get(movement.accountId) ?? balance);
+  }
+  return runningBalances;
+}
