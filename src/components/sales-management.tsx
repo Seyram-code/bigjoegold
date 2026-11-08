@@ -546,7 +546,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
           <Card>
             <CardHeader><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-[#f5e3b0] text-[#795719]"><FileText size={16} /></span><CardTitle>Sale Breakdown</CardTitle></div></CardHeader>
             <CardContent className="space-y-3 text-xs">
-              <SummaryRow label="Pure weight" value={quote ? `${quote.pureGrams.toFixed(5)} g` : "—"} />
+              <SummaryRow label="Pure weight" value={quote ? `${formatDecimalTruncated(quote.pureGrams.toString(), 2)} g` : "—"} />
               <SummaryRow label="Subtotal" value={quote ? formatCurrency(quote.subtotal.toNumber()) : "—"} />
               <SummaryRow label="Amount paid" value={formatCurrency(Number(amountPaid || 0))} />
               <SummaryRow label="Balance due" value={quote ? formatCurrency(Math.max(0, quote.total.toNumber() - Number(amountPaid || 0))) : "—"} />

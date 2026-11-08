@@ -468,13 +468,15 @@ test("customer validation supports alternate phone and archive-only updates", ()
 
 test("currency formatting preserves cents for values beyond JavaScript safe integer precision", () => {
   assert.match(formatCurrencyExact("100000000000000.23"), /100,000,000,000,000\.23/);
-  assert.equal(formatPriceAmount("999999999999.123456", "GHS"), "GHS 999,999,999,999.123456");
+  assert.equal(formatPriceAmount("999999999999.123456", "GHS"), "GHS 999,999,999,999.12");
 });
 
 test("numeric values truncate toward zero at display and decimal precision limits", () => {
   assert.equal(formatCurrency("1.239"), "GH₵ 1.23");
   assert.equal(formatCurrency("-1.239"), "-GH₵ 1.23");
   assert.equal(formatDecimalTruncated("-1.239", 2), "-1.23");
+  assert.equal(formatDecimalTruncated("1.23999", 5), "1.23");
+  assert.equal(formatWeight("455.56999", "g", 5), "455.56 g");
   assert.equal(formatWeight("0.1"), "100 g");
   assert.equal(formatWeight("0.99999"), "999.99 g");
   assert.equal(formatWeight("1"), "1.00 kg");

@@ -9,6 +9,7 @@ import { CalendarPicker } from "@/components/ui/calendar-picker";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { useToast } from "@/components/ui/toast-provider";
 import { formatCurrency, formatTwoDecimalTruncated } from "@/lib/formatters";
+import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { calculateGoldMeasurements } from "@/lib/gold";
 import type { PurchaseFormulaRules } from "@/lib/purchase-formula";
 
@@ -208,7 +209,7 @@ export function MansoBranchManagement({
         <div className="mt-2 grid grid-cols-2 gap-3">
           <div>
             <p className="text-[10px] font-medium text-[#89929d]">Total weight</p>
-            <p className="mt-1 break-words text-lg font-bold text-[#17212f]">{Number(data?.goldTotals.quantityKg ?? 0).toLocaleString("en-GH", { maximumFractionDigits: 3 })} kg</p>
+            <p className="mt-1 break-words text-lg font-bold text-[#17212f]">{formatDecimalTruncated(data?.goldTotals.quantityKg ?? 0, 2)} kg</p>
           </div>
           <div>
             <p className="text-[10px] font-medium text-[#89929d]">Recorded value</p>
@@ -355,7 +356,7 @@ export function MansoBranchManagement({
                     : movement.type === "TRANSFER_OUT" ? "Cash returned" : "Branch expense";
                   const measurement = trade?.purchaseMeasurement;
                   const details = trade
-                    ? `${trade.reference} · ${Number(trade.quantityKg).toLocaleString()} kg · actual cost ${formatCurrency(Number(trade.totalAmount))}${measurement ? ` · ${Number(measurement.karat).toFixed(2)} kt` : ""}`
+                    ? `${trade.reference} · ${formatDecimalTruncated(trade.quantityKg, 2)} kg · actual cost ${formatCurrency(Number(trade.totalAmount))}${measurement ? ` · ${Number(measurement.karat).toFixed(2)} kt` : ""}`
                     : movement.description ?? "—";
                   return <tr key={movement.id} className="border-b border-[#f0f2f4] last:border-0">
                     <td className="whitespace-nowrap px-3 py-3">{displayDate(movement.movementDate)}</td>

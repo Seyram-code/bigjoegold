@@ -8,7 +8,8 @@ export function truncateDecimal(value: number | string, decimalPlaces: number) {
 }
 
 export function formatDecimalTruncated(value: number | string, decimalPlaces: number) {
-  return truncateDecimal(value, decimalPlaces).toFixed(decimalPlaces, Prisma.Decimal.ROUND_DOWN);
+  const displayPlaces = Math.max(0, Math.min(decimalPlaces, 2));
+  return truncateDecimal(value, displayPlaces).toFixed(displayPlaces, Prisma.Decimal.ROUND_DOWN);
 }
 
 export function formatCompactNumberTruncated(value: number | string) {

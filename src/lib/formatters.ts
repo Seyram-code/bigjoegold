@@ -49,7 +49,7 @@ export const formatWeight = (value: number | string, unit?: "kg" | "g", precisio
   const weight = new Prisma.Decimal(String(value));
   const displayUnit = unit ?? (weight.abs().greaterThanOrEqualTo(1) ? "kg" : "g");
   const displayValue = !unit && displayUnit === "g" ? weight.mul(1000) : weight;
-  const displayPrecision = displayUnit === "kg" ? 2 : precision ?? 3;
+  const displayPrecision = Math.min(displayUnit === "kg" ? 2 : precision ?? 2, 2);
   return `${new Intl.NumberFormat("en-GH", {
     minimumFractionDigits: displayUnit === "kg" ? 2 : 0,
     maximumFractionDigits: displayPrecision,
@@ -62,6 +62,6 @@ export function formatPriceAmount(value: number | string, currency: string) {
   const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value));
   if (!match) throw new RangeError("Price amount must be a finite decimal");
   const major = new Intl.NumberFormat("en-GH").format(BigInt(match[2]));
-  const fraction = (match[3] ?? "").slice(0, 6).replace(/0+$/, "");
+  const fraction = (match[3] ?? "").slice(0, 2).replace(/0+$/, "");
   return `${match[1]}${currency} ${major}${fraction ? `.${fraction}` : ""}`;
 }
