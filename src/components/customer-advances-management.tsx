@@ -89,6 +89,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const [fulfillmentProcessing, setFulfillmentProcessing] = useState(false);
   const [error, setError] = useState("");
   const { success: showToast } = useToast();
+  const [showOpeningBalanceForm, setShowOpeningBalanceForm] = useState(false);
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [customerBusy, setCustomerBusy] = useState(false);
   const [newCustomer, setNewCustomer] = useState<CustomerInput>({
@@ -99,6 +100,15 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     email: "",
     country: "Ghana",
   });
+
+  useEffect(() => {
+    if (!showOpeningBalanceForm || busy) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowOpeningBalanceForm(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, showOpeningBalanceForm]);
 
   async function createCustomer(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -360,6 +370,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       setOpeningBalanceAmount("");
       setOpeningBalanceNote("");
       await load();
+      setShowOpeningBalanceForm(false);
       showToast(`Opening balance recorded for ${selectedSupplier.name}; no cash receipt was created.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to record the supplier opening balance");
@@ -453,24 +464,44 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     </div>
     <AlertDialog open={Boolean(error)} title="Customer advance error" description={error} onConfirm={() => setError("")} />
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Record existing supplier debt</CardTitle>
-        <p className="text-xs text-[#7c8793]">Enter a balance the supplier already owes Big Joe. This records no cash receipt or cash-account movement.</p>
-      </CardHeader>
-      <CardContent className="grid gap-3 sm:grid-cols-2">
-        <FormField label="Supplier" htmlFor="supplier-opening-balance">
-          <CustomerAutocomplete id="supplier-opening-balance" customers={customers.filter((customer) => customer.kind === "SUPPLIER")} value={supplierId} onChange={setSupplierId} placeholder="Search suppliers by name or ID" />
-        </FormField>
-        <FormField label="Amount owed to Big Joe (GHS)" htmlFor="supplier-opening-amount">
-          <GhanaAmountInput id="supplier-opening-amount" min="0.01" step="0.01" value={openingBalanceAmount} onChange={setOpeningBalanceAmount} className={fieldControlClass} />
-        </FormField>
-        <FormField label="Note / reference" htmlFor="supplier-opening-note" className="sm:col-span-2">
-          <input id="supplier-opening-note" value={openingBalanceNote} onChange={(event) => setOpeningBalanceNote(event.target.value)} className={fieldControlClass} maxLength={500} />
-        </FormField>
-        {canWrite && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !selectedSupplier || !openingBalanceAmount} onClick={() => { void submitOpeningBalance(); }}><WalletCards size={15} /> Record opening balance</Button></div>}
+    {canWrite && <Card>
+      <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div><h2 className="text-sm font-semibold text-[#263342]">Existing supplier debt</h2><p className="mt-1 text-xs text-[#7c8793]">Record a supplier balance owed to Big Joe without creating a cash receipt.</p></div>
+        <Button type="button" variant="gold" onClick={() => setShowOpeningBalanceForm(true)}><WalletCards size={15} /> Record existing supplier debt</Button>
       </CardContent>
-    </Card>
+    </Card>}
+
+    {showOpeningBalanceForm && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#0c1521]/60 p-4 backdrop-blur-[2px]" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) setShowOpeningBalanceForm(false);
+    }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="supplier-opening-balance-title" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#e8ebef] bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,.3)] sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="supplier-opening-balance-title" className="text-lg font-bold tracking-tight text-[#17212f]">Record existing supplier debt</h2>
+            <p className="mt-1 text-sm text-[#637083]">Enter the balance the supplier already owes Big Joe. No cash receipt or cash-account movement will be created.</p>
+          </div>
+          <button type="button" aria-label="Close existing supplier debt form" disabled={busy} onClick={() => setShowOpeningBalanceForm(false)} className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6] disabled:opacity-50"><X size={18} /></button>
+        </div>
+        <form className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-12" onSubmit={(event) => {
+          event.preventDefault();
+          void submitOpeningBalance();
+        }}>
+          <FormField label="Supplier" htmlFor="supplier-opening-balance" className="xl:col-span-5">
+            <CustomerAutocomplete id="supplier-opening-balance" customers={customers.filter((customer) => customer.kind === "SUPPLIER")} value={supplierId} onChange={setSupplierId} placeholder="Search suppliers by name or ID" />
+          </FormField>
+          <FormField label="Amount owed to Big Joe (GHS)" htmlFor="supplier-opening-amount" className="xl:col-span-3">
+            <GhanaAmountInput id="supplier-opening-amount" min="0.01" step="0.01" value={openingBalanceAmount} onChange={setOpeningBalanceAmount} className={fieldControlClass} />
+          </FormField>
+          <FormField label="Note / reference" htmlFor="supplier-opening-note" className="sm:col-span-2 xl:col-span-4">
+            <input id="supplier-opening-note" value={openingBalanceNote} onChange={(event) => setOpeningBalanceNote(event.target.value)} className={fieldControlClass} maxLength={500} />
+          </FormField>
+          <div className="flex justify-end gap-2 sm:col-span-2 xl:col-span-12">
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setShowOpeningBalanceForm(false)}>Cancel</Button>
+            <Button type="submit" variant="gold" disabled={busy || loading || !selectedSupplier || !openingBalanceAmount}><WalletCards size={15} /> {busy ? "Saving…" : "Record opening balance"}</Button>
+          </div>
+        </form>
+      </section>
+    </div>}
 
     <div className="grid items-start gap-3 xl:grid-cols-2">
       <Card>
