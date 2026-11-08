@@ -84,7 +84,7 @@ export function ExpensesManagement({ canManage, canApprove }: { canManage: boole
         ...current,
         accountId: availableAccounts.some((account) => account.id === current.accountId)
           ? current.accountId
-          : availableAccounts[0]?.id ?? "",
+          : "",
       }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load expenses");

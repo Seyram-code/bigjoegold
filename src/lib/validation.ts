@@ -147,6 +147,12 @@ const advanceMoney = z.string().trim()
 
 export const customerAdvanceSchema = z.discriminatedUnion("action", [
   z.object({
+    action: z.literal("OPENING_BALANCE"),
+    customerId: z.string().trim().min(1).max(191),
+    amount: advanceMoney,
+    note: optionalText,
+  }).strict(),
+  z.object({
     action: z.literal("CREATE_ADVANCE"),
     customerId: z.string().trim().min(1).max(191),
     amount: advanceMoney,

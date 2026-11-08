@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { requireUser, userCan } from "@/lib/authz";
 import { apiError, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import { calculateCustomerAdvanceBalance } from "@/lib/customer-advance-balance";
 import { postSale } from "@/lib/sales";
 import { recordCustomerAdvance } from "@/lib/customer-advances";
 import { customerAdvanceSchema } from "@/lib/validation";
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: customerId ? undefined : 250,
       include: {
-        customer: { select: { id: true, name: true, code: true } },
+        customer: { select: { id: true, name: true, code: true, kind: true } },
         createdBy: { select: { name: true } },
         payments: {
           orderBy: [{ paidAt: "desc" }, { id: "desc" }],
@@ -59,7 +60,7 @@ export async function GET(request: Request) {
         receivedAmount: received.toFixed(2),
         refundedAmount: refunded.toFixed(2),
         fulfilledAmount: fulfilled.toFixed(2),
-        balance: received.minus(refunded).minus(fulfilled).toFixed(2),
+        balance: calculateCustomerAdvanceBalance(advance.openingBalance, advance.payments, advance.requests.flatMap((request) => request.fulfillments)).toFixed(2),
         requests: advance.requests.map((request) => {
           const fulfilledGrams = request.fulfillments.reduce((sum, item) => sum.plus(item.grams), new Prisma.Decimal(0));
           return {

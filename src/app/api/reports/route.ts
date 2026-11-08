@@ -5,6 +5,7 @@ import { formatPriceAmount } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { apiError, HttpError } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
+import { calculateCustomerAdvanceBalance } from "@/lib/customer-advance-balance";
 import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateNetProfit, calculateProfitMetrics } from "@/lib/reporting";
 
 const zero = () => new Prisma.Decimal(0);
@@ -261,7 +262,10 @@ export async function GET(request: Request) {
           select: {
             id: true,
             reference: true,
-            customer: { select: { id: true, name: true } },
+            createdAt: true,
+            openingBalance: true,
+            note: true,
+            customer: { select: { id: true, name: true, kind: true } },
             payments: { select: { amount: true, direction: true } },
             requests: { select: { fulfillments: { select: { amount: true } } } },
           },
@@ -343,6 +347,20 @@ export async function GET(request: Request) {
         customerId: can(user.role, "customers:read", user.permissions) ? fulfillment.request.advance.customer.id : null,
         customer: readCustomerDetails ? fulfillment.request.advance.customer.name : "Restricted customer",
       })),
+      ...(customerAdvanceAccounts ?? [])
+        .filter((account) => !account.openingBalance.isZero() && account.createdAt >= from && account.createdAt <= to)
+        .map((account) => ({
+          id: `${account.id}-opening-balance`,
+          date: account.createdAt.toISOString(),
+          type: "Customer gold advance",
+          accountReference: account.reference,
+          reference: account.reference,
+          relatedReference: "",
+          activity: account.openingBalance.lessThan(0) ? "Opening balance — supplier owes Big Joe" : "Opening balance — credit owed to supplier",
+          amount: account.openingBalance.abs().toNumber(),
+          customerId: can(user.role, "customers:read", user.permissions) ? account.customer.id : null,
+          customer: readCustomerDetails ? account.customer.name : "Restricted customer",
+        })),
       ...(buyerFinanceSettlements ?? []).map((settlement) => ({
         id: settlement.id,
         date: settlement.createdAt.toISOString(),
@@ -358,20 +376,20 @@ export async function GET(request: Request) {
     ].sort((left, right) => left.date.localeCompare(right.date)) : null;
     const financingAccounts = readPayments ? [
       ...(customerAdvanceAccounts ?? []).map((account) => {
-        const received = account.payments.filter((payment) => payment.direction === "INBOUND")
-          .reduce((sum, payment) => sum.plus(payment.amount), zero());
-        const refunded = account.payments.filter((payment) => payment.direction === "OUTBOUND")
-          .reduce((sum, payment) => sum.plus(payment.amount), zero());
-        const fulfilled = account.requests.flatMap((request) => request.fulfillments)
-          .reduce((sum, fulfillment) => sum.plus(fulfillment.amount), zero());
         return {
           id: account.id,
           type: "Customer gold advance",
           accountReference: account.reference,
           customerId: can(user.role, "customers:read", user.permissions) ? account.customer.id : null,
           customer: readCustomerDetails ? account.customer.name : "Restricted customer",
-          balance: received.minus(refunded).minus(fulfilled).toNumber(),
-          balanceMeaning: "Customer credit remaining",
+          balance: calculateCustomerAdvanceBalance(
+            account.openingBalance,
+            account.payments,
+            account.requests.flatMap((request) => request.fulfillments),
+          ).toNumber(),
+          balanceMeaning: account.customer.kind === "SUPPLIER"
+            ? "Negative: supplier owes Big Joe; positive: credit owed to supplier"
+            : "Positive: customer credit; negative: customer owes Big Joe",
         };
       }),
       ...(buyerFinanceAccounts ?? []).map((account) => {

@@ -24,7 +24,7 @@ import { fetchAllCustomers } from "@/lib/customer-client";
 import { customerSchema, type CustomerInput } from "@/lib/validation";
 import { useToast } from "@/components/ui/toast-provider";
 
-type Customer = { id: string; name: string; code: string };
+type Customer = { id: string; name: string; code: string; kind: "BUYER" | "SUPPLIER" };
 type CashAccount = { id: string; name: string; type: string; currency: string; isActive: boolean };
 type BoardPrice = { priceType: "RECEIVING" | "SELLING"; priceAmount: string | number; currency: string; priceUnit: string; source: string; effectiveAt: string };
 type Lot = { id: string; batchNumber: string; source?: string; receivedAt: string; status: string; remainingGrams: string | number; purityBps: number; costPerGram: string | number; ledgerBalanceGrams: string | number; trade?: { purchaseMeasurement: { topKg: string | number; downKg: string | number } | null } | null };
@@ -32,7 +32,7 @@ type AdvancePayment = { id: string; reference: string; direction: "INBOUND" | "O
 type Fulfillment = { reference: string; grams: string | number; amount: string | number; pricePerGram: string | number; purityBps: number; createdAt: string; trade: { id: string; reference: string; transactionDate: string }; boardPrice: { source: string; effectiveAt: string } };
 type FulfillAllocation = { lotId: string; grams: string };
 type GoldRequest = { id: string; reference: string; requestedGrams: string | number; fulfilledGrams: string | number; remainingGrams: string | number; note: string | null; createdAt: string; fulfillments: Fulfillment[] };
-type Advance = { id: string; reference: string; note: string | null; createdAt: string; receivedAmount: string | number; refundedAmount: string | number; fulfilledAmount: string | number; balance: string | number; customer: Customer; payments: AdvancePayment[]; requests: GoldRequest[] };
+type Advance = { id: string; reference: string; note: string | null; createdAt: string; openingBalance: string | number; receivedAmount: string | number; refundedAmount: string | number; fulfilledAmount: string | number; balance: string | number; customer: Customer; payments: AdvancePayment[]; requests: GoldRequest[] };
 type AdvanceAction = "CREATE_ADVANCE" | "ADD_FUNDS" | "REFUND";
 
 const paymentMethods = ["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"] as const;
@@ -64,6 +64,9 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const [selectedAdvanceId, setSelectedAdvanceId] = useState("");
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [customerId, setCustomerId] = useState("");
+  const [supplierId, setSupplierId] = useState("");
+  const [openingBalanceAmount, setOpeningBalanceAmount] = useState("");
+  const [openingBalanceNote, setOpeningBalanceNote] = useState("");
   const [amount, setAmount] = useState("");
   const [accountId, setAccountId] = useState("");
   const [method, setMethod] = useState<(typeof paymentMethods)[number]>("CASH");
@@ -140,12 +143,13 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     setLoading(true);
     setError("");
     try {
-      const [advanceResponse, accountResponse, inventoryResponse, formulaResponse, nextCustomers] = await Promise.all([
+      const [advanceResponse, accountResponse, inventoryResponse, formulaResponse, nextBuyers, nextSuppliers] = await Promise.all([
         fetch("/api/customer-advances", { cache: "no-store" }),
         fetch("/api/finance/accounts", { cache: "no-store" }),
         canFulfill ? fetch("/api/inventory", { cache: "no-store" }) : Promise.resolve(null),
         canFulfill ? fetch("/api/receiving/formula", { cache: "no-store" }) : Promise.resolve(null),
         fetchAllCustomers<Customer>("BUYER"),
+        fetchAllCustomers<Customer>("SUPPLIER"),
       ]);
       const [advanceBody, accountBody, inventoryBody, formulaBody] = await Promise.all([
         advanceResponse.json(), accountResponse.json(), inventoryResponse?.json(), formulaResponse?.json(),
@@ -164,7 +168,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       const inventory = (inventoryBody ?? {}) as { lots?: Lot[] };
       const nextLots = (inventory.lots ?? []).filter((lot) => lot.status === "ACTIVE" && Number(lot.ledgerBalanceGrams) > 0);
       setAdvances(nextAdvances);
-      setCustomers(nextCustomers);
+      setCustomers([...nextBuyers, ...nextSuppliers]);
       setAccounts(nextAccounts);
       setLots(nextLots);
       setBoardPrice(advanceData.currentBoardPrice ?? null);
@@ -174,8 +178,9 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         .filter((request) => Number(request.remainingGrams) > 0)
         .map((request) => request.id)));
       setSelectedRequestId((current) => nextOpenRequestIds.has(current) ? current : nextOpenRequestIds.values().next().value ?? "");
-      setCustomerId((current) => current || nextCustomers[0]?.id || "");
-      setAccountId((current) => nextAccounts.some((item) => item.id === current) ? current : nextAccounts[0]?.id ?? "");
+      setCustomerId((current) => current || nextBuyers[0]?.id || "");
+      setSupplierId((current) => nextSuppliers.some((supplier) => supplier.id === current) ? current : nextSuppliers[0]?.id ?? "");
+      setAccountId("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load customer advances");
     } finally {
@@ -189,8 +194,9 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   }, [load]);
 
   const selectedAdvance = advances.find((advance) => advance.id === selectedAdvanceId);
+  const selectedSupplier = customers.find((customer) => customer.id === supplierId && customer.kind === "SUPPLIER");
   const openRequests = advances.flatMap((advance) => advance.requests
-    .filter((request) => Number(request.remainingGrams) > 0)
+    .filter((request) => advance.customer.kind === "BUYER" && Number(request.remainingGrams) > 0)
     .map((request) => ({ ...request, advance, customer: advance.customer })));
   const selectedRequest = openRequests.find((request) => request.id === selectedRequestId);
   const selectableFulfillmentLots = lots.filter((lot) => lot.status === "ACTIVE"
@@ -327,6 +333,41 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     }
   }
 
+  async function submitOpeningBalance() {
+    setError("");
+    if (!selectedSupplier) {
+      setError("Select a supplier before recording an opening balance.");
+      return;
+    }
+    if (!openingBalanceAmount) {
+      setError("Enter the amount the supplier owes Big Joe.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch("/api/customer-advances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "OPENING_BALANCE",
+          customerId: selectedSupplier.id,
+          amount: openingBalanceAmount,
+          note: openingBalanceNote,
+        }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to record the supplier opening balance"));
+      setOpeningBalanceAmount("");
+      setOpeningBalanceNote("");
+      await load();
+      showToast(`Opening balance recorded for ${selectedSupplier.name}; no cash receipt was created.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to record the supplier opening balance");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function fulfillRequest(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -403,7 +444,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       <div>
         <p className="text-xs font-medium text-[#8b949e]">Workspace / Sales</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#17212f]">Supplier gold advances</h1>
-        <p className="mt-1 text-sm text-[#76808c]">Record customer funds, gold requests, partial releases and the remaining cash credit or amount due.</p>
+        <p className="mt-1 text-sm text-[#76808c]">Record existing supplier debts, customer funds, gold requests, and repayments or releases.</p>
       </div>
       <RefreshButton loading={loading} onClick={() => { void load(); }} />
     </div>
@@ -412,12 +453,31 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     </div>
     <AlertDialog open={Boolean(error)} title="Customer advance error" description={error} onConfirm={() => setError("")} />
 
+    <Card>
+      <CardHeader>
+        <CardTitle>Record existing supplier debt</CardTitle>
+        <p className="text-xs text-[#7c8793]">Enter a balance the supplier already owes Big Joe. This records no cash receipt or cash-account movement.</p>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-2">
+        <FormField label="Supplier" htmlFor="supplier-opening-balance">
+          <CustomerAutocomplete id="supplier-opening-balance" customers={customers.filter((customer) => customer.kind === "SUPPLIER")} value={supplierId} onChange={setSupplierId} placeholder="Search suppliers by name or ID" />
+        </FormField>
+        <FormField label="Amount owed to Big Joe (GHS)" htmlFor="supplier-opening-amount">
+          <GhanaAmountInput id="supplier-opening-amount" min="0.01" step="0.01" value={openingBalanceAmount} onChange={setOpeningBalanceAmount} className={fieldControlClass} />
+        </FormField>
+        <FormField label="Note / reference" htmlFor="supplier-opening-note" className="sm:col-span-2">
+          <input id="supplier-opening-note" value={openingBalanceNote} onChange={(event) => setOpeningBalanceNote(event.target.value)} className={fieldControlClass} maxLength={500} />
+        </FormField>
+        {canWrite && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !selectedSupplier || !openingBalanceAmount} onClick={() => { void submitOpeningBalance(); }}><WalletCards size={15} /> Record opening balance</Button></div>}
+      </CardContent>
+    </Card>
+
     <div className="grid items-start gap-3 xl:grid-cols-2">
       <Card>
         <CardHeader><CardTitle>Record customer cash advance</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
           <div>
-            <FormField label="Customer" htmlFor="advance-customer"><CustomerAutocomplete id="advance-customer" customers={customers} value={customerId} onChange={setCustomerId} placeholder="Search customers by name or ID" /></FormField>
+            <FormField label="Customer" htmlFor="advance-customer"><CustomerAutocomplete id="advance-customer" customers={customers.filter((customer) => customer.kind === "BUYER")} value={customerId} onChange={setCustomerId} placeholder="Search customers by name or ID" /></FormField>
             {canCreateCustomer && <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => { setError(""); setShowCustomerForm(true); }}><Plus size={14} /> Add new customer</Button>}
           </div>
           <FormField label="Amount received (GHS)" htmlFor="advance-amount"><GhanaAmountInput id="advance-amount" min="0.01" step="0.01" value={amount} onChange={setAmount} className={fieldControlClass} /></FormField>
@@ -432,7 +492,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
           </FormField>
           <PaymentFields idPrefix="new-advance" accountId={accountId} setAccountId={setAccountId} accounts={accounts} method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} />
           <FormField label="Note / receipt reference" htmlFor="advance-note"><input id="advance-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
-          {canWrite && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !customerId || !amount} onClick={() => { void submit("CREATE_ADVANCE"); }}><WalletCards size={15} /> Record advance</Button></div>}
+          {canWrite && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !customerId || !amount || !accountId} onClick={() => { void submit("CREATE_ADVANCE"); }}><WalletCards size={15} /> Record advance</Button></div>}
         </CardContent>
       </Card>
 
@@ -473,15 +533,15 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       </div>}
 
       <Card>
-        <CardHeader><CardTitle>Add funds or refund cash</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{selectedAdvance?.customer.kind === "SUPPLIER" ? "Record supplier payment or refund" : "Add funds or refund cash"}</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
-          <FormField label="Customer advance" htmlFor="advance-ledger"><select id="advance-ledger" value={selectedAdvanceId} onChange={(event) => setSelectedAdvanceId(event.target.value)} className={fieldControlClass}><option value="">Select an advance</option>{advances.map((advance) => <option key={advance.id} value={advance.id}>{advance.customer.name} · {currency(advance.balance)}</option>)}</select></FormField>
-          <FormField label="Amount (GHS)" htmlFor="advance-adjust-amount"><GhanaAmountInput id="advance-adjust-amount" min="0.01" step="0.01" value={amount} onChange={setAmount} className={fieldControlClass} /></FormField>
+          <FormField label="Advance account" htmlFor="advance-ledger"><select id="advance-ledger" value={selectedAdvanceId} onChange={(event) => setSelectedAdvanceId(event.target.value)} className={fieldControlClass}><option value="">Select an advance</option>{advances.map((advance) => <option key={advance.id} value={advance.id}>{advance.customer.name} · {advance.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {currency(advance.balance)}</option>)}</select></FormField>
+          <FormField label={selectedAdvance?.customer.kind === "SUPPLIER" ? "Amount received (GHS)" : "Amount (GHS)"} htmlFor="advance-adjust-amount"><GhanaAmountInput id="advance-adjust-amount" min="0.01" step="0.01" value={amount} onChange={setAmount} className={fieldControlClass} /></FormField>
           <PaymentFields idPrefix="adjust-advance" accountId={accountId} setAccountId={setAccountId} accounts={accounts} method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} />
           <FormField label="Note / reason" htmlFor="advance-adjust-note"><input id="advance-adjust-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
           {canWrite && <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button variant="gold" disabled={busy || loading || !selectedAdvanceId || !amount} onClick={() => { void submit("ADD_FUNDS"); }}>Add funds</Button>
-            <Button variant="outline" disabled={busy || loading || !selectedAdvanceId || !amount || Number(selectedAdvance?.balance ?? 0) <= 0} onClick={() => { void submit("REFUND"); }}>Refund available credit</Button>
+            <Button variant="gold" disabled={busy || loading || !selectedAdvanceId || !amount || !accountId} onClick={() => { void submit("ADD_FUNDS"); }}>{selectedAdvance?.customer.kind === "SUPPLIER" ? "Record payment received" : "Add funds"}</Button>
+            <Button variant="outline" disabled={busy || loading || !selectedAdvanceId || !amount || !accountId || Number(selectedAdvance?.balance ?? 0) <= 0} onClick={() => { void submit("REFUND"); }}>{selectedAdvance?.customer.kind === "SUPPLIER" ? "Refund overpayment" : "Refund available credit"}</Button>
           </div>}
         </CardContent>
       </Card>
@@ -530,15 +590,16 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     </div>
 
     <Card>
-      <CardHeader><CardTitle>Customer advance balances and history</CardTitle></CardHeader>
+      <CardHeader><CardTitle>Supplier and customer advance balances and history</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         {advances.length === 0 && <p className="py-6 text-center text-sm text-[#89929d]">{loading ? "Loading customer advances…" : "No customer advances have been recorded."}</p>}
         {advances.map((advance) => {
           const balance = Number(advance.balance);
+          const isSupplier = advance.customer.kind === "SUPPLIER";
           return <article key={advance.id} className="overflow-hidden rounded-xl border border-[#e8ebef]">
             <div className="flex flex-wrap items-center justify-between gap-3 bg-[#fafbfc] px-4 py-3">
-              <div><p className="text-sm font-semibold text-[#263342]">{advance.customer.name} <span className="font-normal text-[#7b8793]">· {advance.reference}</span></p><p className="mt-1 text-[11px] text-[#788491]">Received {currency(advance.receivedAmount)} · Fulfilled {currency(advance.fulfilledAmount)} · Refunded {currency(advance.refundedAmount)}</p></div>
-              <div className="text-right"><p className="text-[10px] uppercase tracking-wide text-[#89929d]">{balance >= 0 ? "Cash credit owed to customer" : "Amount customer owes"}</p><p className={`mt-1 text-base font-bold tabular-nums ${balance < 0 ? "text-rose-700" : "text-[#263342]"}`}>{currency(Math.abs(balance))}</p></div>
+              <div><p className="text-sm font-semibold text-[#263342]">{advance.customer.name} <span className="font-normal text-[#7b8793]">· {advance.reference}</span></p><p className="mt-1 text-[11px] text-[#788491]">Received {currency(advance.receivedAmount)} · Fulfilled {currency(advance.fulfilledAmount)} · Refunded {currency(advance.refundedAmount)}</p>{Number(advance.openingBalance) !== 0 && <p className="mt-1 text-[11px] text-[#788491]">Opening balance: {currency(Math.abs(Number(advance.openingBalance)))}{advance.note ? ` · ${advance.note}` : ""} · no cash receipt recorded</p>}</div>
+              <div className="text-right"><p className="text-[10px] uppercase tracking-wide text-[#89929d]">{balance >= 0 ? isSupplier ? "Credit owed to supplier" : "Cash credit owed to customer" : isSupplier ? "Supplier owes Big Joe" : "Amount customer owes"}</p><p className={`mt-1 text-base font-bold tabular-nums ${balance < 0 ? "text-rose-700" : "text-[#263342]"}`}>{currency(Math.abs(balance))}</p></div>
             </div>
             <div className="grid gap-4 p-4 lg:grid-cols-2">
               <div>

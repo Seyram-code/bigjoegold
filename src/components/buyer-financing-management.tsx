@@ -96,7 +96,7 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
       setCashAccounts(nextCashAccounts);
       setCustomerId((current) => current || nextCustomers[0]?.id || "");
       setSelectedAccountId((current) => nextAccounts.some((account) => account.id === current) ? current : nextAccounts[0]?.id || "");
-      setCashAccountId((current) => nextCashAccounts.some((account) => account.id === current) ? current : nextCashAccounts[0]?.id || "");
+      setCashAccountId((current) => nextCashAccounts.some((account) => account.id === current) ? current : "");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load buyer financing accounts");
     } finally {

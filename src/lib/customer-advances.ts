@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { addAudit, reference } from "@/lib/records";
 import { HttpError } from "@/lib/http";
 import { recordPaymentMovement } from "@/lib/finance";
+import { calculateCustomerAdvanceBalance } from "@/lib/customer-advance-balance";
 import type { CustomerAdvanceInput } from "@/lib/validation";
 
 type TransactionClient = Prisma.TransactionClient;
@@ -15,14 +16,12 @@ async function currentReferencePrice(tx: TransactionClient) {
 }
 
 async function advanceBalance(tx: TransactionClient, advanceId: string) {
-  const [payments, fulfillments] = await Promise.all([
+  const [advance, payments, fulfillments] = await Promise.all([
+    tx.customerAdvance.findUniqueOrThrow({ where: { id: advanceId }, select: { openingBalance: true } }),
     tx.payment.findMany({ where: { customerAdvanceId: advanceId }, select: { amount: true, direction: true } }),
     tx.advanceFulfillment.findMany({ where: { request: { advanceId } }, select: { amount: true } }),
   ]);
-  const depositsAndRefunds = payments.reduce((balance, payment) => balance.plus(
-    payment.direction === "INBOUND" ? payment.amount : payment.amount.negated(),
-  ), new Prisma.Decimal(0));
-  return depositsAndRefunds.minus(fulfillments.reduce((sum, item) => sum.plus(item.amount), new Prisma.Decimal(0)));
+  return calculateCustomerAdvanceBalance(advance.openingBalance, payments, fulfillments);
 }
 
 async function ensureAdvanceLocked(tx: TransactionClient, advanceId: string) {
@@ -66,6 +65,36 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
   return prisma.$transaction(async (tx) => {
     const paidAt = "paidAt" in input ? new Date(input.paidAt) : new Date();
     if (paidAt > new Date()) throw new HttpError("Advance payment date cannot be in the future", 400);
+
+    if (input.action === "OPENING_BALANCE") {
+      const supplier = await tx.customer.findUnique({ where: { id: input.customerId } });
+      if (!supplier || !supplier.isActive || supplier.kind !== "SUPPLIER") {
+        throw new HttpError("Select an active supplier", 400);
+      }
+      const amount = new Prisma.Decimal(input.amount);
+      const advance = await tx.customerAdvance.create({
+        data: {
+          reference: reference("ADV"),
+          customerId: supplier.id,
+          openingBalance: amount.negated(),
+          note: input.note || null,
+          createdById: userId,
+        },
+      });
+      await addAudit(tx, {
+        userId,
+        action: "supplier.advance.opening_balance.created",
+        entity: "CustomerAdvance",
+        entityId: advance.id,
+        details: {
+          reference: advance.reference,
+          supplierId: supplier.id,
+          amountOwedToBigJoe: amount.toFixed(2),
+          note: input.note || null,
+        },
+      });
+      return advance;
+    }
 
     if (input.action === "CREATE_ADVANCE") {
       const customer = await tx.customer.findUnique({ where: { id: input.customerId } });
@@ -163,6 +192,9 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
     }
 
     const advance = await ensureAdvanceLocked(tx, input.advanceId);
+    if (advance.customer.kind !== "BUYER") {
+      throw new HttpError("Gold requests can only be created for buyer advances", 400);
+    }
     return createGoldRequest(tx, advance, input.requestedGrams, input.note, userId);
   });
 }

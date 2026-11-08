@@ -301,7 +301,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
       setRecords(Array.isArray(recordBody) ? recordBody : []);
       setValues((current) => ({
         ...current,
-        cashAccountId: current.cashAccountId || nextAccounts[0]?.id || "",
+        cashAccountId: nextAccounts.some((account) => account.id === current.cashAccountId) ? current.cashAccountId : "",
         boardPriceId: nextPrices.find((price) => price.priceType === "RECEIVING" && price.currency === "GHS" && price.priceUnit === nextFormula.priceUnit)?.id || "",
       }));
     } catch (cause) {
@@ -614,7 +614,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
           onConfirm={() => {}}
         />
         <div className="flex flex-wrap justify-end gap-2 sm:col-span-2 xl:col-span-4">
-          <Button type="button" variant="outline" size="sm" className="h-8 text-[10px]" disabled={busy || loading} onClick={() => { setEditingId(null); setFinancingAccountId(""); setAmountPaidTouched(false); setValues({ ...emptyForm(), boardPriceId: compatiblePrices[0]?.id ?? "", cashAccountId: cashAccounts[0]?.id ?? "" }); setError(""); }}><X size={12} /> Clear</Button>
+          <Button type="button" variant="outline" size="sm" className="h-8 text-[10px]" disabled={busy || loading} onClick={() => { setEditingId(null); setFinancingAccountId(""); setAmountPaidTouched(false); setValues({ ...emptyForm(), boardPriceId: compatiblePrices[0]?.id ?? "" }); setError(""); }}><X size={12} /> Clear</Button>
           {canWrite && <Button type="button" variant="outline" size="sm" className="h-8 border-[#d6aa42] bg-[#f8e6b0] text-[10px] text-[#6d4d13] hover:bg-[#f1d98c]" disabled={busy || loading} onClick={() => { void save("DRAFT"); }}><Save size={12} />{busy ? "Saving…" : "Save as Draft"}</Button>}
           {canWrite && (formulaRules.ownerConfirmed
             ? <Button type="button" variant="gold" size="sm" className="h-8 bg-[#f6bd2d] text-[10px] text-[#17212f] hover:bg-[#e9ae1d]" disabled={busy || loading || !calculation.result || Boolean(paymentError)} onClick={() => { void save("COMPLETE"); }}>{busy && busyMessage ? <LoaderCircle size={12} className="animate-spin" aria-hidden="true" /> : <Check size={12} />}{busy && busyMessage ? busyMessage : "Complete Purchase"}</Button>

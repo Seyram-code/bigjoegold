@@ -127,7 +127,8 @@ export function FinanceManagement({
           if (!movementDateEdited.current) setMovement((current) => ({ ...current, movementDate: localDateTime(offset) }));
         }
       }
-      setAccounts(Array.isArray(data.accounts) ? data.accounts as FinanceAccount[] : []);
+      const availableAccounts = Array.isArray(data.accounts) ? data.accounts as FinanceAccount[] : [];
+      setAccounts(availableAccounts);
       if (data.overview && typeof data.overview === "object") setSummary(data.overview as Row);
       if (Array.isArray(data.payments)) setPayments(data.payments as Row[]);
       if (Array.isArray(data.movements)) setMovements(data.movements as Row[]);
@@ -136,13 +137,15 @@ export function FinanceManagement({
       if (!background && data.settings && typeof data.settings === "object") setSettings(data.settings as typeof settings);
       setPayment((current) => ({
         ...current,
-        cashAccountId: current.cashAccountId || (Array.isArray(data.accounts) ? String((data.accounts as FinanceAccount[]).find((item) => item.isActive && item.currency === "GHS")?.id ?? "") : ""),
+        cashAccountId: availableAccounts.some((item) => item.id === current.cashAccountId && item.isActive && item.currency === "GHS")
+          ? current.cashAccountId
+          : "",
       }));
       setMovement((current) => ({
         ...current,
-        accountId: current.accountId || (Array.isArray(data.accounts) ? String((data.accounts as FinanceAccount[]).find((item) => item.isActive)?.id ?? "") : ""),
-        fromAccountId: current.fromAccountId || (Array.isArray(data.accounts) ? String((data.accounts as FinanceAccount[]).find((item) => item.isActive)?.id ?? "") : ""),
-        toAccountId: current.toAccountId || (Array.isArray(data.accounts) ? String((data.accounts as FinanceAccount[]).find((item) => item.isActive && item.id !== current.fromAccountId)?.id ?? "") : ""),
+        accountId: availableAccounts.some((item) => item.id === current.accountId && item.isActive) ? current.accountId : "",
+        fromAccountId: availableAccounts.some((item) => item.id === current.fromAccountId && item.isActive) ? current.fromAccountId : "",
+        toAccountId: availableAccounts.some((item) => item.id === current.toAccountId && item.isActive) ? current.toAccountId : "",
       }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load finance records");

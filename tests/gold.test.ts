@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
+import { calculateCustomerAdvanceBalance } from "../src/lib/customer-advance-balance";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { calculateBatchSaleQuote, calculateMeasuredSaleQuote, calculatePurchaseMeasurements, calculateSaleQuote, calculateTradeAmount, calculateWeightedBatchDensity, inferSaleDownWeightFromReceipts, planFifo } from "../src/lib/gold";
 import { DEFAULT_PURCHASE_FORMULA_RULES, PURCHASE_FORMULA_VERSION, purchaseFormulaRules } from "../src/lib/purchase-formula";
@@ -366,6 +367,17 @@ test("receiving validation rejects zero down-weight and manual calculation overr
 });
 
 test("customer gold advance actions validate payment, request, and stock fulfillment inputs", () => {
+  assert.equal(customerAdvanceSchema.safeParse({
+    action: "OPENING_BALANCE",
+    customerId: "supplier-id",
+    amount: "73850.00",
+    note: "Existing supplier debt",
+  }).success, true);
+  assert.equal(customerAdvanceSchema.safeParse({
+    action: "OPENING_BALANCE",
+    customerId: "supplier-id",
+    amount: "0",
+  }).success, false);
   const commonPayment = {
     amount: "2000000.00",
     cashAccountId: "cash-account-id",
@@ -423,6 +435,16 @@ test("customer gold advance actions validate payment, request, and stock fulfill
     advanceId: "advance-id",
     requestedGrams: "0",
   }).success, false);
+});
+
+test("supplier opening debt stays out of cash receipts and is reduced by received payments", () => {
+  const openingDebt = new Prisma.Decimal("-73850");
+  const balance = calculateCustomerAdvanceBalance(
+    openingDebt,
+    [{ direction: "INBOUND", amount: new Prisma.Decimal("10000") }],
+    [],
+  );
+  assert.equal(balance.toFixed(2), "-63850.00");
 });
 
 test("customer validation supports alternate phone and archive-only updates", () => {

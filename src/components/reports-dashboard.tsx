@@ -35,6 +35,7 @@ type StatementRow = {
 };
 type FinancingStatement = {
   type: "customer-advances" | "buyer-financing";
+  customerKind: "BUYER" | "SUPPLIER";
   customerName: string;
   customerCode: string;
   customerPhone: string | null;
@@ -322,7 +323,7 @@ export function ReportsDashboard() {
 
   async function openStatement(customerId: string, customerName: string, type: FinancingStatement["type"]) {
     const requestId = ++statementRequestId.current;
-    setStatement({ type, customerName, customerCode: "", customerPhone: null, phoneRestricted: false, balance: 0, rows: [] });
+    setStatement({ type, customerKind: "BUYER", customerName, customerCode: "", customerPhone: null, phoneRestricted: false, balance: 0, rows: [] });
     setStatementError("");
     setStatementLoading(true);
     try {
@@ -349,12 +350,16 @@ export function ReportsDashboard() {
       let totalBalancePesewas = 0;
       let name = customerName;
       let code = "";
+      let customerKind: "BUYER" | "SUPPLIER" = "BUYER";
       if (type === "customer-advances") {
         const payload = body as { advances?: Array<{
           id: string;
           reference: string;
+          createdAt: string;
+          openingBalance: string | number;
+          note: string | null;
           balance: string | number;
-          customer: { id: string; name: string; code: string };
+          customer: { id: string; name: string; code: string; kind: "BUYER" | "SUPPLIER" };
           payments: Array<{ reference: string; direction: "INBOUND" | "OUTBOUND"; amount: string | number; method: string; paidAt: string; note: string | null; cashAccount: { name: string } | null }>;
           requests: Array<{ reference: string; fulfillments: Array<{ reference: string; createdAt: string; grams: string | number; amount: string | number; pricePerGram: string | number; trade: { reference: string } }> }>;
         }> };
@@ -362,12 +367,27 @@ export function ReportsDashboard() {
         for (const advance of payload.advances.filter((item) => item.customer.id === customerId)) {
           name = advance.customer.name;
           code = advance.customer.code;
+          customerKind = advance.customer.kind;
           totalBalancePesewas += Math.round(Number(advance.balance) * 100);
+          if (Number(advance.openingBalance) !== 0) {
+            rows.push({
+              id: `${advance.id}-opening-balance`,
+              date: advance.createdAt,
+              account: advance.reference,
+              activity: "Opening balance",
+              reference: advance.reference,
+              details: [advance.note, "No cash receipt recorded"].filter(Boolean).join(" · "),
+              increase: Number(advance.openingBalance) > 0 ? Number(advance.openingBalance) : 0,
+              decrease: Number(advance.openingBalance) < 0 ? Math.abs(Number(advance.openingBalance)) : 0,
+            });
+          }
           rows.push(...advance.payments.map((payment) => ({
             id: `${advance.id}-${payment.reference}`,
             date: payment.paidAt,
             account: advance.reference,
-            activity: payment.direction === "INBOUND" ? "Advance received" : "Refund paid",
+            activity: advance.customer.kind === "SUPPLIER"
+              ? payment.direction === "INBOUND" ? "Supplier payment received" : "Supplier overpayment refunded"
+              : payment.direction === "INBOUND" ? "Advance received" : "Refund paid",
             reference: payment.reference,
             details: [payment.method.replaceAll("_", " "), payment.cashAccount?.name, payment.note].filter(Boolean).join(" · "),
             increase: payment.direction === "INBOUND" ? Number(payment.amount) : 0,
@@ -427,7 +447,7 @@ export function ReportsDashboard() {
         return { ...row, balance: balancePesewas / 100 };
       });
       if (requestId === statementRequestId.current) {
-        setStatement({ type, customerName: name, customerCode: code, customerPhone, phoneRestricted, balance: totalBalancePesewas / 100, rows: statementRows });
+        setStatement({ type, customerKind, customerName: name, customerCode: code, customerPhone, phoneRestricted, balance: totalBalancePesewas / 100, rows: statementRows });
       }
     } catch (cause) {
       if (requestId === statementRequestId.current) {
@@ -722,7 +742,7 @@ export function ReportsDashboard() {
     ];
     const accountId = accountOptions.some((account) => account.id === selectedPaymentAccountId)
       ? selectedPaymentAccountId
-      : accountOptions[0]?.id ?? "";
+      : "";
     const accountTotals = accountOptions.map((account) => {
       const accountPayments = payments.filter((payment) =>
         account.id === UNASSIGNED_ACCOUNT ? payment.accountId === null : payment.accountId === account.id,
@@ -786,6 +806,7 @@ export function ReportsDashboard() {
           <div className="report-controls flex flex-wrap items-center gap-2">
             <label htmlFor="cash-account-statement" className="sr-only">Cash account</label>
             <select id="cash-account-statement" value={accountId} onChange={(event) => setSelectedPaymentAccountId(event.target.value)} className="h-9 rounded-lg border border-[#dfe4e9] bg-white px-3 text-xs" disabled={!accountOptions.length}>
+              <option value="">Select an account</option>
               {accountOptions.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
             </select>
             <Button type="button" variant="gold" size="sm" onClick={() => window.print()} disabled={!selectedAccount}><Printer size={14} /> Print / Save PDF</Button>
@@ -984,26 +1005,30 @@ export function ReportsDashboard() {
             ? <AlertDialog open title="Financing statement error" description={statementError} onConfirm={() => setStatementError("")} />
             : <>
               <section className="mt-4 rounded-lg border border-[#e7ebef] bg-[#fafbfc] px-4 py-3">
-                <h3 className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">Customer</h3>
+                <h3 className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">{statement.customerKind === "SUPPLIER" ? "Supplier" : "Customer"}</h3>
                 <p className="mt-1 text-base font-semibold text-[#17212f]">{statement.customerName}</p>
                 <p className="mt-1 text-sm text-[#495564]">Phone: {statement.phoneRestricted ? "Restricted" : statement.customerPhone ?? "Not on file"}</p>
                 {statement.customerCode && <p className="mt-1 text-xs text-[#637083]">Customer code: {statement.customerCode}</p>}
               </section>
               <div className="mt-4 flex flex-wrap justify-between gap-2 border-y border-[#e7ebef] py-3 text-sm">
                 <p>Current position: <strong>{statement.type === "customer-advances"
-                  ? `${statement.balance >= 0 ? "Credit owed to customer" : "Amount customer owes"} ${currency(Math.abs(statement.balance))}`
+                  ? `${statement.customerKind === "SUPPLIER"
+                    ? statement.balance < 0 ? "Supplier owes Big Joe" : statement.balance > 0 ? "Credit owed to supplier" : "Settled"
+                    : statement.balance >= 0 ? "Credit owed to customer" : "Amount customer owes"} ${currency(Math.abs(statement.balance))}`
                   : `${statement.balance > 0 ? "Customer owes Big Joe" : statement.balance < 0 ? "Big Joe owes customer" : "Settled"} ${currency(Math.abs(statement.balance))}`}</strong></p>
               </div>
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[900px] text-left text-xs">
-                  <thead><tr className="border-b border-[#dfe4e9] text-[#637083]"><th className="py-2 pr-3">Date</th><th className="py-2 pr-3">Account</th><th className="py-2 pr-3">Activity</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Details</th><th className="py-2 pr-3 text-right">{statement.type === "customer-advances" ? "Credit increase" : "Advance paid"}</th><th className="py-2 pr-3 text-right">{statement.type === "customer-advances" ? "Applied / refunded" : "Gold / cash received"}</th><th className="py-2 text-right">Balance</th></tr></thead>
+                  <thead><tr className="border-b border-[#dfe4e9] text-[#637083]"><th className="py-2 pr-3">Date</th><th className="py-2 pr-3">Account</th><th className="py-2 pr-3">Activity</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Details</th><th className="py-2 pr-3 text-right">{statement.type === "customer-advances" ? statement.customerKind === "SUPPLIER" ? "Balance increase" : "Credit increase" : "Advance paid"}</th><th className="py-2 pr-3 text-right">{statement.type === "customer-advances" ? statement.customerKind === "SUPPLIER" ? "Balance decrease" : "Applied / refunded" : "Gold / cash received"}</th><th className="py-2 text-right">Balance</th></tr></thead>
                   <tbody>{statement.rows.map((row) => <tr key={row.id} className="border-b border-[#edf0f3] align-top"><td className="whitespace-nowrap py-2 pr-3">{date(row.date)}</td><td className="py-2 pr-3">{row.account}</td><td className="py-2 pr-3">{row.activity}</td><td className="py-2 pr-3">{row.reference}</td><td className="py-2 pr-3">{row.details || "—"}</td><td className="whitespace-nowrap py-2 pr-3 text-right">{row.increase ? currency(row.increase) : "—"}</td><td className="whitespace-nowrap py-2 pr-3 text-right">{row.decrease ? currency(row.decrease) : "—"}</td><td className="whitespace-nowrap py-2 text-right font-semibold">{currency(row.balance)}</td></tr>)}
                     {!statement.rows.length && <tr><td colSpan={8} className="py-6 text-center text-[#89929d]">No account activity to include in this statement.</td></tr>}
                   </tbody>
                 </table>
               </div>
               <p className="mt-3 text-xs text-[#637083]">{statement.type === "customer-advances"
-                ? "A positive balance is cash credit owed to the customer; a negative balance means the customer owes Big Joe Gold."
+                ? statement.customerKind === "SUPPLIER"
+                  ? "A negative balance means the supplier owes Big Joe Gold; a positive balance is credit owed to the supplier."
+                  : "A positive balance is cash credit owed to the customer; a negative balance means the customer owes Big Joe Gold."
                 : "A positive balance means the customer owes Big Joe; a negative balance means Big Joe owes the customer."}</p>
             </>}
       </section>

@@ -124,7 +124,7 @@ export function MansoBranchManagement({
         ...current,
         cashAccountId: result.accounts.some((account) => account.id === current.cashAccountId)
           ? current.cashAccountId
-          : result.accounts[0]?.id ?? "",
+          : "",
       }));
       setError("");
     } catch (cause) {

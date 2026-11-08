@@ -203,7 +203,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
           ? accountBody.filter((account) => account.currency === "GHS")
           : [];
         setCashAccounts(activeCashAccounts);
-        setCashAccountId((current) => current || activeCashAccounts[0]?.id || "");
+        setCashAccountId((current) => activeCashAccounts.some((account) => account.id === current) ? current : "");
       }
       if (formulaBody && "version" in formulaBody) setFormulaRules(formulaBody);
       if (Array.isArray(boardBody)) {
@@ -286,7 +286,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
     setInitialPayment("0");
     setPaymentAmountTouched(false);
     setMethod("CASH");
-    setCashAccountId(cashAccounts[0]?.id ?? "");
+    setCashAccountId("");
     setNote("");
     setError("");
   }

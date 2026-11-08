@@ -104,7 +104,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
         ...current,
         accountId: result.accounts.some((account) => account.id === current.accountId)
           ? current.accountId
-          : result.accounts[0]?.id ?? "",
+          : "",
       }));
       setOpeningForms(Object.fromEntries(result.accounts.map((account) => [
         account.id,
@@ -251,7 +251,6 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       });
       if (!response.ok) throw new Error(await responseError(response));
       const account = await response.json() as Account;
-      setEntryForm((current) => ({ ...current, accountId: account.id }));
       setNewAccountForm({ type: "BANK", name: "", bankNameTelco: "", accountNumber: "", openingBalance: "" });
       showToast(`${account.name} ledger created.`);
       await loadData();
@@ -318,6 +317,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       <CardContent>
         <form onSubmit={submitEntry} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label><span className={fieldLabelClass}>Ledger</span><select required value={entryForm.accountId} onChange={(event) => setEntryForm((current) => ({ ...current, accountId: event.target.value }))} className={dateInputClass} disabled={!data?.accounts.length}>
+            <option value="">Select a ledger</option>
             {data?.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select></label>
           <label><span className={fieldLabelClass}>Payment direction</span><select value={entryForm.direction} onChange={(event) => setEntryForm((current) => ({ ...current, direction: event.target.value as Direction }))} className={dateInputClass}>

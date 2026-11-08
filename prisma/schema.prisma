@@ -577,16 +577,17 @@ model Payment {
 }
 
 model CustomerAdvance {
-  id          String                   @id @default(cuid())
-  reference   String                   @unique
-  customerId  String
-  customer    Customer                 @relation(fields: [customerId], references: [id])
-  note        String?                  @db.Text
-  createdAt   DateTime                 @default(now())
-  createdById String
-  createdBy   User                     @relation("CustomerAdvanceCreatedBy", fields: [createdById], references: [id])
-  payments    Payment[]
-  requests    CustomerAdvanceRequest[]
+  id             String                   @id @default(cuid())
+  reference      String                   @unique
+  customerId     String
+  customer       Customer                 @relation(fields: [customerId], references: [id])
+  openingBalance Decimal                  @default(0) @db.Decimal(16, 2)
+  note           String?                  @db.Text
+  createdAt      DateTime                 @default(now())
+  createdById    String
+  createdBy      User                     @relation("CustomerAdvanceCreatedBy", fields: [createdById], references: [id])
+  payments       Payment[]
+  requests       CustomerAdvanceRequest[]
 
   @@index([customerId, createdAt])
 }
