@@ -17,6 +17,7 @@ import { CustomerAutocomplete } from "@/components/ui/customer-autocomplete";
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { calculateMeasuredSaleQuote, inferSaleDownWeightFromReceipts } from "@/lib/gold";
+import { adjustSaleAllocations } from "@/lib/sales-allocation";
 import { formatCurrency, formatPriceAmount, formatTwoDecimalTruncated, formatWeight } from "@/lib/formatters";
 import { DEFAULT_PURCHASE_FORMULA_RULES, type PurchaseFormulaRules } from "@/lib/purchase-formula";
 import { fetchAllCustomers } from "@/lib/customer-client";
@@ -70,8 +71,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const [note, setNote] = useState("");
   const [requestedGrams, setRequestedGrams] = useState("");
   const [requestedGoldUnit, setRequestedGoldUnit] = useState<"g" | "kg">("g");
-  const [lotId, setLotId] = useState("");
-  const [fulfillmentGrams, setFulfillmentGrams] = useState("");
+  const [selectedLotIds, setSelectedLotIds] = useState<string[]>([]);
   const [fulfillmentAllocations, setFulfillmentAllocations] = useState<FulfillAllocation[]>([]);
   const [measurementTopGrams, setMeasurementTopGrams] = useState("");
   const [measurementDownGrams, setMeasurementDownGrams] = useState("");
@@ -176,7 +176,6 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       setSelectedRequestId((current) => nextOpenRequestIds.has(current) ? current : nextOpenRequestIds.values().next().value ?? "");
       setCustomerId((current) => current || nextCustomers[0]?.id || "");
       setAccountId((current) => nextAccounts.some((item) => item.id === current) ? current : nextAccounts[0]?.id ?? "");
-      setLotId((current) => nextLots.some((lot) => lot.id === current) ? current : nextLots[0]?.id ?? "");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load customer advances");
     } finally {
@@ -194,7 +193,9 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     .filter((request) => Number(request.remainingGrams) > 0)
     .map((request) => ({ ...request, advance, customer: advance.customer })));
   const selectedRequest = openRequests.find((request) => request.id === selectedRequestId);
-  const selectedLot = lots.find((lot) => lot.id === lotId);
+  const selectableFulfillmentLots = lots.filter((lot) => lot.status === "ACTIVE"
+    && Number(lot.ledgerBalanceGrams) > 0
+    && !fulfillmentAllocations.some((allocation) => allocation.lotId === lot.id));
   const allocatedFulfillmentDecimal = fulfillmentAllocations.reduce((sum, allocation) => sum.plus(allocation.grams), new Prisma.Decimal(0));
   const allocatedFulfillmentGrams = allocatedFulfillmentDecimal.toNumber();
   const measurement = useMemo(() => {
@@ -208,6 +209,21 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       return { result: null, error: cause instanceof Error ? cause.message : "Check the entered gold measurements" };
     }
   }, [measurementTopGrams, measurementDownGrams, boardPrice, formulaRules]);
+  const allocationAdjustment = useMemo(() => {
+    if (!fulfillmentAllocations.length || !measurement.result) return { allocations: null, error: "" };
+    try {
+      return {
+        allocations: adjustSaleAllocations(
+          fulfillmentAllocations,
+          lots.map((lot) => ({ id: lot.id, remainingGrams: lot.ledgerBalanceGrams })),
+          measurementTopGrams,
+        ),
+        error: "",
+      };
+    } catch (cause) {
+      return { allocations: null, error: cause instanceof Error ? cause.message : "The selected batches cannot cover this top weight" };
+    }
+  }, [fulfillmentAllocations, lots, measurement.result, measurementTopGrams]);
   const weightedPurityBps = measurement.result?.purityBps ?? 0;
   const fulfillmentQuote = useMemo(() => {
     if (!measurementConfirmed || !measurement.result || !allocatedFulfillmentDecimal.greaterThan(0)
@@ -224,6 +240,33 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     );
     setMeasurementDownGrams(downGrams ? formatTwoDecimalTruncated(downGrams.toString()) : "");
     setMeasurementConfirmed(false);
+  }
+
+  function updateFulfillmentAllocations(allocations: FulfillAllocation[]) {
+    setFulfillmentAllocations(allocations);
+    updateFulfillmentMeasurements(allocations);
+  }
+
+  function addSelectedFulfillmentBatches() {
+    setError("");
+    if (!selectedLotIds.length) {
+      setError("Select at least one stock batch.");
+      return;
+    }
+    const selectedLots = selectedLotIds.map((selectedId) => lots.find((lot) => lot.id === selectedId));
+    if (selectedLots.some((lot) => !lot || lot.status !== "ACTIVE" || Number(lot.ledgerBalanceGrams) <= 0)) {
+      setError("One or more selected batches are no longer available. Refresh inventory and try again.");
+      return;
+    }
+    if (fulfillmentAllocations.length + selectedLots.length > 50) {
+      setError("A gold release can include no more than 50 stock batches.");
+      return;
+    }
+    updateFulfillmentAllocations([
+      ...fulfillmentAllocations,
+      ...selectedLots.flatMap((lot) => lot ? [{ lotId: lot.id, grams: String(lot.ledgerBalanceGrams) }] : []),
+    ]);
+    setSelectedLotIds([]);
   }
 
   async function submit(action: AdvanceAction) {
@@ -338,7 +381,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       if (!body || typeof body !== "object" || !("id" in body) || typeof body.id !== "string") {
         throw new Error("The gold request was fulfilled, but its receipt could not be opened. Find the transaction in Sales History.");
       }
-      setFulfillmentGrams("");
+      setSelectedLotIds([]);
       setFulfillmentAllocations([]);
       setMeasurementTopGrams("");
       setMeasurementDownGrams("");
@@ -447,35 +490,20 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         <CardHeader><CardTitle>Fulfill requested gold</CardTitle></CardHeader>
         <CardContent>
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={fulfillRequest}>
-            <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {formatWeight(request.remainingGrams, "g", 2)} requested (optional)</option>)}</select></FormField>
-            <FormField label="Available stock batch" htmlFor="fulfill-lot"><StockAutocomplete id="fulfill-lot" required value={lotId} onChange={(selectedLotId) => {
-              setLotId(selectedLotId);
-              const lot = lots.find((item) => item.id === selectedLotId);
-              setFulfillmentGrams(lot ? String(lot.ledgerBalanceGrams) : "");
-            }} placeholder="Search available batches" lots={lots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
-            <div className="flex items-end gap-2">
-              <FormField label="Batch grams to release" htmlFor="fulfill-grams" hint={selectedRequest ? `Up to ${formatWeight(selectedRequest.remainingGrams, "g", 2)} requested; you may release less.` : undefined}><input id="fulfill-grams" type="number" min="0.00001" step="0.00001" max={selectedLot ? Number(selectedLot.ledgerBalanceGrams) : undefined} value={fulfillmentGrams} onChange={(event) => setFulfillmentGrams(event.target.value)} className={fieldControlClass} /></FormField>
-              <Button type="button" variant="outline" className="mb-0.5 h-10 shrink-0" disabled={!selectedLot || !fulfillmentGrams} onClick={() => {
-                  if (!selectedLot || !/^\d+(?:\.\d{1,5})?$/.test(fulfillmentGrams) || Number(fulfillmentGrams) <= 0) return;
-                  const existing = fulfillmentAllocations.find((allocation) => allocation.lotId === selectedLot.id);
-                  const next = existing
-                    ? fulfillmentAllocations.map((allocation) => allocation.lotId === selectedLot.id ? { ...allocation, grams: new Prisma.Decimal(allocation.grams).plus(fulfillmentGrams).toFixed(5) } : allocation)
-                    : [...fulfillmentAllocations, { lotId: selectedLot.id, grams: fulfillmentGrams }];
-                  setFulfillmentAllocations(next);
-                  updateFulfillmentMeasurements(next);
-                  setFulfillmentGrams("");
-              }}>Add batch</Button>
-            </div>
+            <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setSelectedLotIds([]); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {formatWeight(request.remainingGrams, "g", 2)} requested (optional)</option>)}</select></FormField>
+            <FormField label="Select stock batches" htmlFor="fulfill-batches"><StockAutocomplete id="fulfill-batches" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableFulfillmentLots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
+            <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedFulfillmentBatches}><Plus size={14} /> Add selected batches</Button></div>
+            {selectedLotIds.length > 0 && <p className="text-xs text-[#89929d] sm:col-span-2">Selected batches are added with their available weights. Adjust each release amount below if needed.</p>}
             {fulfillmentAllocations.length > 0 && <div className="space-y-1 rounded-md border border-[#edf0f3] p-2 text-xs sm:col-span-2">
               {fulfillmentAllocations.map((allocation) => {
                 const lot = lots.find((item) => item.id === allocation.lotId);
-                return <div key={allocation.lotId} className="flex items-center justify-between gap-2"><span>{lot?.batchNumber ?? "Stock batch"} · {formatWeight(allocation.grams, "g", 2)}</span><button type="button" className="text-rose-700 hover:underline" onClick={() => {
+                return <div key={allocation.lotId} className="grid grid-cols-[minmax(0,1fr)_120px_auto] items-center gap-2"><span className="truncate">{lot?.source ? `${lot.source} · ` : ""}{lot?.batchNumber ?? "Stock batch"} · {lot ? new Date(lot.receivedAt).toLocaleDateString("en-GH") : ""}</span><div className="flex items-center gap-1"><input aria-label={`Release grams from ${lot?.batchNumber ?? "stock batch"}`} type="number" min="0.00001" max={Number(lot?.ledgerBalanceGrams ?? 0)} step="0.00001" value={allocation.grams} onChange={(event) => updateFulfillmentAllocations(fulfillmentAllocations.map((entry) => entry.lotId === allocation.lotId ? { ...entry, grams: event.target.value } : entry))} className="h-9 min-w-0 flex-1 rounded-md border border-[#dfe4e9] px-2 text-xs outline-none focus:border-[#bc8c36]" /><span className="text-[#89929d]">g</span></div><button type="button" className="text-rose-700 hover:underline" onClick={() => {
                   const next = fulfillmentAllocations.filter((item) => item.lotId !== allocation.lotId);
-                  setFulfillmentAllocations(next);
-                  updateFulfillmentMeasurements(next);
+                  updateFulfillmentAllocations(next);
                 }}>Remove</button></div>;
               })}
-              <p className="border-t pt-1 font-semibold">Total release: {formatWeight(allocatedFulfillmentGrams, "g", 2)}</p>
+              <p className="border-t pt-1 font-semibold">Total release: {formatWeight(allocatedFulfillmentGrams, "g", 2)}{selectedRequest ? ` · Remaining request: ${formatWeight(selectedRequest.remainingGrams, "g", 2)}` : ""}</p>
+              {selectedRequest && allocatedFulfillmentDecimal.greaterThan(selectedRequest.remainingGrams) && <p role="alert" className="rounded-md bg-amber-50 px-2 py-1 text-amber-900">Reduce the batch amounts to no more than the remaining requested weight.</p>}
             </div>}
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#e8ebef] p-3 sm:col-span-2">
               <Button type="button" variant={measurementConfirmed ? "outline" : "gold"} disabled={!boardPrice || !fulfillmentAllocations.length} onClick={() => {
@@ -538,7 +566,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         <button type="button" onClick={() => setMeasurementModalOpen(false)} aria-label="Close gold measurement" className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6]"><X size={16} /></button>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <FormField label="Top weight (g)" htmlFor="advance-measurement-top" hint="Must match the total grams allocated from stock batches.">
+        <FormField label="Top weight (g)" htmlFor="advance-measurement-top" hint="Editing this updates the release weight and spreads the allocation across selected batches, up to their available stock.">
           <input id="advance-measurement-top" type="number" min="0.00001" step="0.00001" max="999999.99999999" value={measurementTopGrams} onChange={(event) => { setMeasurementTopGrams(event.target.value); setMeasurementConfirmed(false); }} className={fieldControlClass} />
         </FormField>
         <FormField label="Down weight (g)" htmlFor="advance-measurement-down" hint="Auto-calculated from receiving measurements of the selected batches; partial batches are scaled. You can adjust it if remeasured.">
@@ -550,10 +578,16 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         <FormField label="Purity (calculated)" htmlFor="advance-measurement-purity"><input id="advance-measurement-purity" readOnly value={measurement.result ? `${formatTwoDecimalTruncated(measurement.result.purity.toString())}%` : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
       </div>
       {measurement.error && <p role="alert" className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{measurement.error}</p>}
-      {measurement.result && !measurement.result.topGrams.equals(allocatedFulfillmentDecimal) && <p role="alert" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Measured top weight ({formatWeight(measurement.result.topGrams.toString(), "g", 5)}) must exactly match the allocated stock weight ({formatWeight(allocatedFulfillmentDecimal.toString(), "g", 5)}).</p>}
+      {allocationAdjustment.error && <p role="alert" className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{allocationAdjustment.error}</p>}
       <div className="sale-measurement-price mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d6aa42] bg-[#fff7df] p-4">
         <div><p className="text-[10px] font-semibold uppercase tracking-wide text-[#795719]">Calculated gold value</p><p className="mt-1 text-2xl font-bold tabular-nums text-[#17212f]">{measurement.result ? currency(measurement.result.total.toFixed(2)) : "—"}</p><p className="mt-1 text-[10px] text-[#637083]">{boardPrice ? `Selling board price: ${formatPriceAmount(String(boardPrice.priceAmount), "GHS")} per pure gram` : "No compatible selling board price available"}</p></div>
-        <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => setMeasurementModalOpen(false)}>Cancel</Button><Button type="button" variant="gold" disabled={!measurement.result || !fulfillmentAllocations.length || !measurement.result.topGrams.equals(allocatedFulfillmentDecimal)} onClick={() => { setMeasurementConfirmed(true); setMeasurementModalOpen(false); }}><Check size={15} /> Apply measurements</Button></div>
+        <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => setMeasurementModalOpen(false)}>Cancel</Button><Button type="button" variant="gold" disabled={!measurement.result || !allocationAdjustment.allocations} onClick={() => {
+          if (!measurement.result || !allocationAdjustment.allocations) return;
+          setFulfillmentAllocations(allocationAdjustment.allocations);
+          setMeasurementTopGrams(measurement.result.topGrams.toFixed(5));
+          setMeasurementConfirmed(true);
+          setMeasurementModalOpen(false);
+        }}><Check size={15} /> Apply measurements</Button></div>
       </div>
     </section>
   </div>}
