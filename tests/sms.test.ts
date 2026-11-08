@@ -64,18 +64,33 @@ test("manual ledger transaction and login SMS include their record details", () 
   assert.match(login, /Time:/);
 });
 
-test("end-of-day SMS lists each account balance and the combined total", () => {
-  const message = manualMomoClosingSummarySms("2026-11-06", [
+test("end-of-day SMS sends short GSM-safe account summaries and a separate total", () => {
+  const messages = manualMomoClosingSummarySms("2026-11-06", [
     { name: "MOMO 1", type: "MOBILE_MONEY", balance: "1250.50" },
     { name: "Bank 1", type: "BANK", balance: "800.00" },
     { name: "Cash", type: "CASH", balance: "50.25" },
   ], "Ama");
-  assert.match(message, /6 Nov 2026/);
-  assert.match(message, /MOMO 1 \(mobile money\): GH₵ 1,250\.50/);
-  assert.match(message, /Bank 1 \(bank\): GH₵ 800\.00/);
-  assert.match(message, /Cash \(cash\): GH₵ 50\.25/);
-  assert.match(message, /Total: GH₵ 2,100\.75/);
-  assert.match(message, /Closed by: Ama/);
+  const summary = messages.join(" ");
+  assert.match(summary, /6 Nov 2026/);
+  assert.match(summary, /MOMO 1 \(mobile money\): GHS 1,250\.50/);
+  assert.match(summary, /Bank 1 \(bank\): GHS 800\.00/);
+  assert.match(summary, /Cash \(cash\): GHS 50\.25/);
+  assert.match(summary, /Total GHS 2,100\.75/);
+  assert.match(summary, /By: Ama/);
+  assert.ok(messages.every((message) => message.length <= 150 && /^[\x20-\x7E]+$/.test(message)));
+});
+
+test("end-of-day SMS splits large account lists into bounded plain-text messages", () => {
+  const accounts = Array.from({ length: 10 }, (_, index) => ({
+    name: `Mobile Money Account ${index + 1}`,
+    type: "MOBILE_MONEY",
+    balance: "1250.50",
+  }));
+  const messages = manualMomoClosingSummarySms("2026-11-06", accounts, "Ama");
+  assert.ok(messages.length > 2);
+  assert.ok(messages.every((message) => message.length <= 150 && /^[\x20-\x7E]+$/.test(message)));
+  assert.ok(messages.some((message) => message.includes("Mobile Money Account 10")));
+  assert.ok(messages.at(-1)?.includes("Total GHS 12,505.00"));
 });
 
 test("Wigal rejection logs bounded, redacted provider details", async (t) => {

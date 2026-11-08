@@ -62,11 +62,18 @@ export async function POST(request: Request) {
 
     if (accounts.length === 0) throw new HttpError("Create at least one ledger before closing the business day", 409);
 
-    const sent = await sendOwnerSms(manualMomoClosingSummarySms(closingDate, accounts, user.name));
-    if (!sent) {
-      throw new HttpError("The closing SMS could not be sent. Check the owner SMS configuration and try again.", 502);
+    const messages = manualMomoClosingSummarySms(closingDate, accounts, user.name);
+    let queuedParts = 0;
+    for (const message of messages) {
+      if (!await sendOwnerSms(message)) {
+        const detail = queuedParts
+          ? `${queuedParts} of ${messages.length} closing SMS parts were accepted; some may already be queued. Check before retrying.`
+          : "The closing SMS could not be queued. Check the owner SMS configuration and try again.";
+        throw new HttpError(detail, 502);
+      }
+      queuedParts += 1;
     }
-    return Response.json({ sent: true, closingDate, accountCount: accounts.length });
+    return Response.json({ queued: true, queuedParts, closingDate, accountCount: accounts.length });
   } catch (error) {
     return apiError(error);
   }

@@ -33,7 +33,22 @@ function frogConfig(): FrogConfig | null {
 }
 
 function compact(value: string) { return value.replace(/\s+/g, " ").trim(); }
+function smsSafeText(value: string) {
+  return compact(value.normalize("NFKD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9 .,;:!?()'&+/-]/g, "?"));
+}
 function paymentMethodLabel(method: string) { return method.replaceAll("_", " ").toLowerCase(); }
+function wrapSmsText(value: string, limit: number) {
+  const parts: string[] = [];
+  let remaining = value;
+  while (remaining.length > limit) {
+    let breakAt = remaining.lastIndexOf(" ", limit);
+    if (breakAt <= 0) breakAt = limit;
+    parts.push(remaining.slice(0, breakAt));
+    remaining = remaining.slice(breakAt).trimStart();
+  }
+  if (remaining) parts.push(remaining);
+  return parts;
+}
 function ghanaDateTime(value: Date) {
   return new Intl.DateTimeFormat("en-GH", {
     dateStyle: "medium",
@@ -91,9 +106,15 @@ export function manualMomoClosingSummarySms(closingDate: string, accounts: Manua
     dateStyle: "medium",
     timeZone: "UTC",
   }).format(new Date(`${closingDate}T00:00:00.000Z`));
-  const balances = accounts.map(({ name, type, balance }) => `${name} (${paymentMethodLabel(type)}): ${formatCurrencyExact(balance)}`);
+  const balances = accounts.map(({ name, type, balance }) => `${smsSafeText(name)} (${smsSafeText(paymentMethodLabel(type))}): ${formatCurrencyExact(balance).replace("GH₵", "GHS")}`);
   const total = accounts.reduce((sum, account) => sum.plus(account.balance), new Prisma.Decimal(0));
-  return compact(`BJG end-of-day balances ${date}. ${balances.join("; ")}. Total: ${formatCurrencyExact(total.toFixed(2))}. Closed by: ${closedBy}.`);
+  const prefix = `${smsSafeText(`BJG EOD ${date} GHS:`)} `;
+  const footer = smsSafeText(`BJG EOD ${date}. Total ${formatCurrencyExact(total.toFixed(2)).replace("GH₵", "GHS")}. By: ${closedBy}.`);
+  const limit = 150;
+  const accountParts = wrapSmsText(balances.join("; "), limit - prefix.length)
+    .map((part) => `${prefix}${part}`);
+  const footerParts = wrapSmsText(footer, limit);
+  return [...accountParts, ...footerParts];
 }
 
 export async function sendOwnerLoginSms(userId: string, loggedInAt: Date) {
