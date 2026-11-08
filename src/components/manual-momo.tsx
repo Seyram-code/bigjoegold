@@ -224,9 +224,10 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
         body: JSON.stringify({ closingDate: to }),
       });
       if (!response.ok) throw new Error(await responseError(response));
-      const result = await response.json() as { queuedParts?: number };
-      const parts = result.queuedParts ?? 1;
-      showToast(`End-of-day balances for ${displayDate(`${to}T00:00:00.000Z`)} queued as ${parts} SMS ${parts === 1 ? "message" : "messages"}. Delivery is not confirmed.`);
+      const result = await response.json() as { queuedMessages?: number; accountCount?: number };
+      const count = result.queuedMessages ?? 1;
+      const accounts = result.accountCount ?? count;
+      showToast(`End-of-day summary for ${displayDate(`${to}T00:00:00.000Z`)} queued: one SMS per account (${accounts}) plus the total (${count} messages). Delivery is not confirmed.`);
     } catch (closeError) {
       setError(closeError instanceof Error ? closeError.message : "Unable to send the end-of-day account balances.");
     } finally {

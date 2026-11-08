@@ -133,7 +133,11 @@ export function MarketPriceIndicator() {
   useAutoRefresh(refresh);
 
   return <>
-    <Link href="/gold-price/current-board-price" title="View receiving and selling gold board prices" className="hidden w-[218px] items-center gap-2 rounded-lg border border-[#b88d24] bg-[#292313] px-2 py-1 sm:flex">
+    <Link
+      href="/gold-price/current-board-price"
+      title={error ? "Board prices are temporarily unavailable. Retrying automatically." : "View receiving and selling gold board prices"}
+      className="hidden w-[218px] items-center gap-2 rounded-lg border border-[#b88d24] bg-[#292313] px-2 py-1 sm:flex"
+    >
     <span className="flex size-7 shrink-0 items-center justify-center rounded-md text-[#f3c548]"><Coins size={18} /></span>
     <span className="min-w-0 flex-1">
       <span className="block text-[8px] font-medium text-[#d9d2c3]">Gold board prices · per pure gram</span>
@@ -149,7 +153,9 @@ export function MarketPriceIndicator() {
       </span>
     </span>
     </Link>
-    <AlertDialog open={error} title="Board price error" description="Unable to load current board prices. Check your connection and try again." onConfirm={() => setError(false)} />
+    <span className="sr-only" aria-live="polite">
+      {loaded && error ? "Unable to load current board prices. Retrying automatically." : ""}
+    </span>
   </>;
 }
 
