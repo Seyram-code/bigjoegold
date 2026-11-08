@@ -284,6 +284,32 @@ export const inventoryMovementSchema = z.discriminatedUnion("action", [
 ]);
 export type InventoryMovementInput = z.infer<typeof inventoryMovementSchema>;
 
+const stocktakeCount = z.string().trim()
+  .regex(/^\d{1,11}(?:\.\d{1,5})?$/, "Enter grams with up to 5 decimal places")
+  .refine((value) => Number.isFinite(Number(value)) && Number(value) >= 0, "Counted stock cannot be negative");
+
+export const inventoryStocktakeSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("START") }).strict(),
+  z.object({
+    action: z.literal("SAVE_COUNTS"),
+    reconciliationId: z.string().trim().min(1).max(191),
+    counts: z.array(z.object({
+      lineId: z.string().trim().min(1).max(191),
+      countedGrams: stocktakeCount.or(z.literal("")),
+      reason: z.string().trim().max(500).optional().default(""),
+    }).strict()).min(1).max(2000),
+  }).strict(),
+  z.object({
+    action: z.literal("COMPLETE"),
+    reconciliationId: z.string().trim().min(1).max(191),
+  }).strict(),
+  z.object({
+    action: z.literal("CANCEL"),
+    reconciliationId: z.string().trim().min(1).max(191),
+  }).strict(),
+]);
+export type InventoryStocktakeInput = z.infer<typeof inventoryStocktakeSchema>;
+
 const receivingWeightGrams = z.string().trim()
   .regex(/^\d{1,6}(?:\.\d{1,8})?$/, "Enter a weight with up to 8 decimal places")
   .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0, "Weight must be greater than zero");
@@ -407,6 +433,28 @@ export const mansoBranchActionSchema = z.discriminatedUnion("action", [
 
 export const financeSettingsSchema = z.object({
   adjustmentApprovalThreshold: z.string().trim().regex(/^(?:\d{1,14}(?:\.\d{1,2})?)?$/).default(""),
+}).strict();
+
+export const expenseCategories = [
+  "RENT",
+  "UTILITIES",
+  "SALARIES",
+  "TRANSPORT",
+  "OFFICE_SUPPLIES",
+  "MAINTENANCE",
+  "COMMUNICATION",
+  "BANK_CHARGES",
+  "SECURITY",
+  "ASSAY",
+  "OTHER",
+] as const;
+
+export const expenseSchema = z.object({
+  accountId: z.string().trim().min(1).max(191),
+  category: z.enum(expenseCategories),
+  amount: manualMomoMoney.refine((value) => Number(value) > 0, "Amount must be greater than zero"),
+  movementDate: pastOrPresentDateTime("Expense date"),
+  description: z.string().trim().min(3).max(500),
 }).strict();
 
 const formulaDecimal = z.string().trim().regex(/^\d{1,8}(?:\.\d{1,8})?$/);

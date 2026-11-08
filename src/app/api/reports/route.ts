@@ -5,7 +5,7 @@ import { formatPriceAmount } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { apiError, HttpError } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "@/lib/reporting";
+import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateNetProfit, calculateProfitMetrics } from "@/lib/reporting";
 
 const zero = () => new Prisma.Decimal(0);
 
@@ -132,6 +132,7 @@ export async function GET(request: Request) {
             amount: true,
             movementDate: true,
             description: true,
+            expenseCategory: true,
             approvalStatus: true,
             account: { select: { name: true, currency: true } },
             createdBy: { select: { name: true } },
@@ -497,10 +498,16 @@ export async function GET(request: Request) {
     const inbound = (payments ?? []).filter((payment) => payment.direction === "INBOUND");
     const outbound = (payments ?? []).filter((payment) => payment.direction === "OUTBOUND");
     const cashIn = sumAmounts(inbound);
-    const cashOut = sumAmounts(outbound);
+    const expenses = cashMovements?.filter((movement) => movement.type === "EXPENSE") ?? null;
+    const approvedExpenses = expenses?.filter((movement) => ["NOT_REQUIRED", "APPROVED"].includes(movement.approvalStatus)) ?? [];
+    const expensesValue = approvedExpenses.reduce((sum, movement) => sum.plus(movement.amount), zero());
+    const cashOut = sumAmounts(outbound).plus(expensesValue);
     const costBasisComplete = sales.every((trade) => new Prisma.Decimal(trade.costBasis).greaterThan(0));
     const overallProfitMetrics = calculateProfitMetrics(salesValue.toFixed(2), costOfSales.toFixed(2));
     const profit = costBasisComplete ? salesValue.minus(costOfSales).toNumber() : null;
+    const netProfit = expenses
+      ? calculateNetProfit(profit, approvedExpenses.map((movement) => movement.amount.toFixed(2)))
+      : null;
 
     const inventoryRows = inventoryLots?.map((lot) => ({
       id: lot.id,
@@ -574,6 +581,8 @@ export async function GET(request: Request) {
         purchases: purchaseValue.toNumber(),
         costOfSales: costOfSales.toNumber(),
         profit,
+        expenses: expenses ? expensesValue.toNumber() : null,
+        netProfit,
         grossMargin: costBasisComplete ? overallProfitMetrics.grossMargin : null,
         returnOnCost: costBasisComplete ? overallProfitMetrics.returnOnCost : null,
         cashIn: cashIn.toNumber(),
@@ -620,6 +629,18 @@ export async function GET(request: Request) {
         movementDate: movement.movementDate.toISOString(),
         account: `${movement.account.name} (${movement.account.currency})`,
         approvalStatus: movement.approvalStatus,
+        description: movement.description ?? "",
+        expenseCategory: movement.expenseCategory?.replaceAll("_", " ") ?? "",
+        createdBy: readStaff ? movement.createdBy.name : "",
+      })) ?? null,
+      expenses: expenses?.map((movement) => ({
+        id: movement.id,
+        reference: movement.reference,
+        movementDate: movement.movementDate.toISOString(),
+        category: movement.expenseCategory?.replaceAll("_", " ") ?? "Other",
+        account: movement.account.name,
+        amount: movement.amount.toNumber(),
+        approvalStatus: movement.approvalStatus.replaceAll("_", " "),
         description: movement.description ?? "",
         createdBy: readStaff ? movement.createdBy.name : "",
       })) ?? null,

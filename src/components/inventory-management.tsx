@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshButton } from "@/components/ui/refresh-button";
@@ -15,6 +15,7 @@ import { formatCurrency, formatWeight } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { useToast } from "@/components/ui/toast-provider";
+import { stocktakeVariance } from "@/lib/stocktake";
 
 type Lot = {
   id: string;
@@ -58,6 +59,32 @@ type Movement = {
   fromLocation: { name: string } | null;
   toLocation: { name: string } | null;
   createdBy: { name: string };
+};
+
+type StocktakeLine = {
+  id: string;
+  inventoryLotId: string;
+  batchNumber: string;
+  locationName: string;
+  expectedGrams: string | number;
+  countedGrams: string | number | null;
+  varianceGrams: string | number;
+  costPerGram: string | number;
+  reason: string | null;
+  correctionRef: string | null;
+};
+type StocktakeSession = {
+  id: string;
+  reference: string;
+  status: "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  startedAt: string;
+  closedAt: string | null;
+  createdBy: { name: string };
+  closedBy: { name: string } | null;
+  lines: StocktakeLine[];
+};
+type StocktakeHistory = Omit<StocktakeSession, "lines"> & {
+  lines: Pick<StocktakeLine, "id" | "expectedGrams" | "countedGrams" | "varianceGrams">[];
 };
 
 export type InventoryView = "opening" | "adjustment" | "transfers" | "current" | "batches" | "movements" | "alerts" | "reconciliation";
@@ -113,6 +140,11 @@ export function InventoryManagement({
   const [error, setError] = useState("");
   const { success: showToast } = useToast();
   const [pendingMovement, setPendingMovement] = useState<{ action: string; values: Record<string, unknown> } | null>(null);
+  const [stocktake, setStocktake] = useState<StocktakeSession | null>(null);
+  const [stocktakeHistory, setStocktakeHistory] = useState<StocktakeHistory[]>([]);
+  const [confirmStocktake, setConfirmStocktake] = useState(false);
+  const [confirmCancelStocktake, setConfirmCancelStocktake] = useState(false);
+  const stocktakeDirty = useRef(false);
   const [form, setForm] = useState<FormValues>({
     batchNumber: "",
     source: "",
@@ -143,9 +175,13 @@ export function InventoryManagement({
           ? fetch(`/api/inventory/movements?page=${page}&pageSize=100`, { cache: "no-store" })
           : Promise.resolve(null),
       ]);
-      const [inventoryBody, movementBody]: [unknown, unknown] = await Promise.all([
+      const stocktakeResponse = view === "reconciliation" && !background
+        ? await fetch("/api/inventory/reconciliations", { cache: "no-store" })
+        : null;
+      const [inventoryBody, movementBody, stocktakeBody]: [unknown, unknown, unknown] = await Promise.all([
         inventoryResponse.json(),
         movementResponse ? movementResponse.json() : Promise.resolve(null),
+        stocktakeResponse ? stocktakeResponse.json() : Promise.resolve(null),
       ]);
       if (!inventoryResponse.ok) throw new Error(messageFrom(inventoryBody, "Unable to load inventory"));
       if (inventoryBody && typeof inventoryBody === "object") {
@@ -167,6 +203,16 @@ export function InventoryManagement({
           setMovements(Array.isArray(data.movements) ? data.movements : []);
           setPageCount(data.pageCount ?? 1);
         }
+      }
+      if (stocktakeResponse) {
+        if (!stocktakeResponse.ok) throw new Error(messageFrom(stocktakeBody, "Unable to load physical stocktakes"));
+        if (!stocktakeBody || typeof stocktakeBody !== "object" || !("active" in stocktakeBody) || !("history" in stocktakeBody)) {
+          throw new Error("The stocktake service returned an invalid response");
+        }
+        const data = stocktakeBody as { active: StocktakeSession | null; history: StocktakeHistory[] };
+        stocktakeDirty.current = false;
+        setStocktake(data.active);
+        setStocktakeHistory(Array.isArray(data.history) ? data.history : []);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load inventory");
@@ -213,6 +259,114 @@ export function InventoryManagement({
     }
   }
 
+  async function startStocktake() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/inventory/reconciliations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "START" }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to start a physical stocktake"));
+      await load();
+      showToast("Stocktake started. Count each listed batch before reviewing variances.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to start a physical stocktake");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function updateStocktakeLine(lineId: string, field: "countedGrams" | "reason", value: string) {
+    stocktakeDirty.current = true;
+    setStocktake((current) => current ? ({
+      ...current,
+      lines: current.lines.map((line) => line.id === lineId
+        ? { ...line, [field]: value }
+        : line),
+    }) : current);
+  }
+
+  async function saveStocktakeCounts() {
+    if (!stocktake) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/inventory/reconciliations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "SAVE_COUNTS",
+          reconciliationId: stocktake.id,
+          counts: stocktake.lines.map((line) => ({
+            lineId: line.id,
+            countedGrams: line.countedGrams === null ? "" : String(line.countedGrams),
+            reason: line.reason ?? "",
+          })),
+        }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to save stocktake counts"));
+      stocktakeDirty.current = false;
+      await load();
+      showToast("Physical counts saved.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to save stocktake counts");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeStocktake() {
+    if (!stocktake) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/inventory/reconciliations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "COMPLETE", reconciliationId: stocktake.id }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to complete stocktake"));
+      setConfirmStocktake(false);
+      setStocktake(null);
+      stocktakeDirty.current = false;
+      await load();
+      showToast("Stocktake completed and variance corrections posted.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to complete stocktake");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelStocktake() {
+    if (!stocktake) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/inventory/reconciliations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "CANCEL", reconciliationId: stocktake.id }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to cancel stocktake"));
+      setConfirmCancelStocktake(false);
+      setStocktake(null);
+      stocktakeDirty.current = false;
+      await load();
+      showToast("Stocktake cancelled. No stock corrections were posted.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to cancel stocktake");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const titles: Record<InventoryView, string> = {
     opening: "Record opening stock",
     adjustment: "Manual stock adjustment",
@@ -227,6 +381,13 @@ export function InventoryManagement({
   const alertLots = lots.filter((lot) => lot.cacheMismatch || Number(lot.ledgerBalanceGrams) < 0 || lot.status === "QUARANTINED");
   const activeWeightKg = Number(summary.kilograms ?? 0);
   const isForm = ["opening", "adjustment", "transfers", "reconciliation"].includes(view);
+  const countedStocktakeLines = stocktake?.lines.filter((line) => line.countedGrams !== null && String(line.countedGrams).trim() !== "") ?? [];
+  const stocktakeVarianceLines = countedStocktakeLines.filter((line) =>
+    !stocktakeVariance(line.expectedGrams, String(line.countedGrams), line.costPerGram).varianceGrams.isZero());
+  const stocktakeCostImpact = stocktakeVarianceLines.reduce((sum, line) =>
+    sum + Number(stocktakeVariance(line.expectedGrams, String(line.countedGrams), line.costPerGram).costImpact), 0);
+  const allStocktakeCountsEntered = Boolean(stocktake && countedStocktakeLines.length === stocktake.lines.length);
+  const allStocktakeVariancesExplained = stocktakeVarianceLines.every((line) => Boolean(line.reason?.trim()));
 
   return <div className="space-y-6">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -237,7 +398,7 @@ export function InventoryManagement({
       </div>
       <RefreshButton loading={loading} onClick={() => { void load(); }} />
     </div>
-    <AlertDialog open={Boolean(error)} title="Inventory error" description={error} onConfirm={() => setError("")} />
+    <AlertDialog open={Boolean(error)} title={view === "reconciliation" ? "Stocktake error" : "Inventory error"} description={error} onConfirm={() => setError("")} />
     {summary.ledgerMismatchCount ? <AlertDialog open title="Inventory reconciliation warning" variant="warning" description={`${summary.ledgerMismatchCount} batch balance(s) differ from the stock ledger. Selling or adjusting affected batches is blocked until they are reconciled.`} onConfirm={() => {}} /> : null}
 
     {["current", "batches", "alerts"].includes(view) && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -253,7 +414,7 @@ export function InventoryManagement({
     </div>}
 
     {isForm && <Card className="border-[#e3d4b8]">
-      <CardHeader><CardTitle>{titles[view]}</CardTitle><p className="mt-1 text-xs text-[#75808d]">All changes are recorded as stock movements with a reason and the signed-in user.</p></CardHeader>
+      <CardHeader><CardTitle>{titles[view]}</CardTitle><p className="mt-1 text-xs text-[#75808d]">{view === "reconciliation" ? "Count each listed batch, review all differences and their estimated cost impact, then post the corrections to the stock ledger." : "All changes are recorded as stock movements with a reason and the signed-in user."}</p></CardHeader>
       <CardContent>
         {view === "opening" && <form className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" onSubmit={(event) => {
           event.preventDefault();
@@ -300,13 +461,85 @@ export function InventoryManagement({
           <p className="text-xs text-[#76808c] sm:col-span-2 xl:col-span-3">Transfers produce paired ledger entries. Partial transfers preserve the same batch number, source, assay, and unit cost at the destination.</p>
         </form>}
 
-        {view === "reconciliation" && <form className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" onSubmit={(event) => { event.preventDefault(); void submit("RECONCILE", { lotId: form.lotId, countedGrams: form.countedGrams, reason: form.reason }); }}>
-          <FormField label="Stock batch" htmlFor="reconcile-lot"><LotOptions id="reconcile-lot" lots={lots} value={form.lotId} onChange={(value) => update("lotId", value)} includeZero /></FormField>
-          <FormField label="Physical count (grams)" htmlFor="reconcile-count"><input id="reconcile-count" type="number" required min="0" step="0.00001" value={form.countedGrams} onChange={(event) => update("countedGrams", event.target.value)} className={fieldControlClass} /></FormField>
-          <ReasonField value={form.reason} onChange={(value) => update("reason", value)} id="reconcile-reason" />
-          <div className="flex items-end"><Button type="submit" variant="gold" disabled={busy || !canReconcile}>{busy ? "Saving…" : "Reconcile physical count"}</Button></div>
-          <p className="text-xs text-[#76808c] sm:col-span-2 xl:col-span-3">The ledger balance is authoritative. A count difference creates a signed correction movement; it never edits or removes prior movements.</p>
-        </form>}
+        {view === "reconciliation" && <div className="space-y-5">
+          {!stocktake && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e8ebef] p-4">
+            <div><p className="text-sm font-semibold text-[#344151]">No stocktake in progress</p><p className="mt-1 text-xs text-[#76808c]">Start a snapshot of all active, quarantined, or mismatched batches. You can save the counts and return later.</p></div>
+            <Button type="button" variant="gold" disabled={busy || loading || !canReconcile} onClick={() => { void startStocktake(); }}>{busy ? "Starting…" : "Start stocktake"}</Button>
+          </div>}
+          {stocktake && <>
+            <div className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-[#e8ebef] p-4">
+              <div><p className="text-sm font-semibold text-[#344151]">{stocktake.reference} · In progress</p><p className="mt-1 text-xs text-[#76808c]">Started {new Date(stocktake.startedAt).toLocaleString("en-GH")} by {stocktake.createdBy.name}. Expected quantities are snapshotted from the stock ledger.</p></div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" disabled={busy || !canReconcile || !stocktakeDirty.current} onClick={() => { void saveStocktakeCounts(); }}>Save counts</Button>
+                <Button type="button" variant="outline" disabled={busy || !canReconcile} onClick={() => setConfirmCancelStocktake(true)}>Cancel stocktake</Button>
+                <Button type="button" variant="gold" disabled={busy || !canReconcile || !allStocktakeCountsEntered || !allStocktakeVariancesExplained || stocktakeDirty.current} onClick={() => setConfirmStocktake(true)}>Review and post corrections</Button>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Metric label="Batches counted" value={`${countedStocktakeLines.length} / ${stocktake.lines.length}`} />
+              <Metric label="Batches with variance" value={String(stocktakeVarianceLines.length)} />
+              <Metric label="Estimated stock-value variance" value={formatCurrency(stocktakeCostImpact)} />
+            </div>
+            {!allStocktakeCountsEntered && <p className="text-xs text-amber-700">Enter a physical weight for every batch. Enter 0 when a batch is not physically present.</p>}
+            <div className="overflow-x-auto rounded-lg border border-[#e8ebef]">
+              <table className="w-full min-w-[1050px] text-left text-xs">
+                <thead className="bg-[#f7f8fa] text-[10px] uppercase tracking-wide text-[#7c8793]">
+                  <tr>{["Batch", "Location", "Expected (g)", "Physical count (g)", "Variance (g)", "Estimated value impact", "Reason for variance"].map((heading) => <th key={heading} className="whitespace-nowrap px-3 py-3 font-semibold">{heading}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-[#edf0f2]">
+                  {stocktake.lines.map((line) => {
+                    const hasCount = line.countedGrams !== null && String(line.countedGrams).trim() !== "";
+                    const variance = hasCount
+                      ? stocktakeVariance(line.expectedGrams, String(line.countedGrams), line.costPerGram)
+                      : null;
+                    return <tr key={line.id}>
+                      <td className="px-3 py-3 font-medium text-[#344151]">{line.batchNumber}</td>
+                      <td className="px-3 py-3 text-[#63707e]">{line.locationName}</td>
+                      <td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatWeight(line.expectedGrams, "g", 5)}</td>
+                      <td className="px-3 py-2"><input
+                        aria-label={`Physical count for ${line.batchNumber}`}
+                        type="number"
+                        min="0"
+                        step="0.00001"
+                        value={line.countedGrams ?? ""}
+                        disabled={!canReconcile || busy}
+                        onChange={(event) => updateStocktakeLine(line.id, "countedGrams", event.target.value)}
+                        className={`${fieldControlClass} min-w-36`}
+                      /></td>
+                      <td className={`whitespace-nowrap px-3 py-3 tabular-nums ${variance && !variance.varianceGrams.isZero() ? variance.varianceGrams.isNegative() ? "text-red-700" : "text-emerald-700" : "text-[#63707e]"}`}>
+                        {variance ? `${variance.varianceGrams.isPositive() ? "+" : ""}${formatWeight(variance.varianceGrams.abs().toString(), "g", 5)}${variance.varianceGrams.isNegative() ? " less" : variance.varianceGrams.isPositive() ? " more" : ""}` : "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 tabular-nums">{variance ? formatCurrency(variance.costImpact.toString()) : "—"}</td>
+                      <td className="px-3 py-2"><input
+                        aria-label={`Reason for variance in ${line.batchNumber}`}
+                        value={line.reason ?? ""}
+                        disabled={!canReconcile || busy}
+                        onChange={(event) => updateStocktakeLine(line.id, "reason", event.target.value)}
+                        maxLength={500}
+                        placeholder={variance && !variance.varianceGrams.isZero() ? "Required for variance" : "Optional"}
+                        className={`${fieldControlClass} min-w-56`}
+                      /></td>
+                    </tr>;
+                  })}
+                  {!stocktake.lines.length && <tr><td colSpan={7} className="px-4 py-8 text-center text-[#89929d]">No batches were included in this stocktake.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {stocktakeDirty.current && <p className="text-xs text-amber-700">You have unsaved count changes. Save counts before reviewing and posting corrections.</p>}
+          </>}
+          {!canReconcile && <p className="text-xs text-red-700">You need inventory reconciliation permission to start or post a stocktake.</p>}
+          {stocktakeHistory.length > 0 && <div className="space-y-2 border-t border-[#edf0f3] pt-4">
+            <h3 className="text-sm font-semibold text-[#344151]">Recent stocktake history</h3>
+            {stocktakeHistory.map((item) => {
+              const varianceCount = item.lines.filter((line) => line.countedGrams !== null
+                && !stocktakeVariance(line.expectedGrams, String(line.countedGrams), 1).varianceGrams.isZero()).length;
+              return <div key={item.id} className="flex flex-wrap justify-between gap-2 rounded-lg bg-[#f7f8fa] px-3 py-2 text-xs">
+                <span className="font-medium text-[#344151]">{item.reference} · {item.status === "COMPLETED" ? "Completed" : "Cancelled"} · {item.lines.length} batches · {varianceCount} variances</span>
+                <span className="text-[#76808c]">{item.closedAt ? new Date(item.closedAt).toLocaleString("en-GH") : "—"} · {item.closedBy?.name ?? "—"}</span>
+              </div>;
+            })}
+          </div>}
+        </div>}
         {!canOpen && view === "opening" && <AlertDialog open title="Permission required" description="You do not have permission to record opening stock." onConfirm={() => {}} />}
         {!canAdjust && view === "adjustment" && <AlertDialog open title="Permission required" description="You do not have permission to adjust stock." onConfirm={() => {}} />}
         {!canTransfer && view === "transfers" && <AlertDialog open title="Permission required" description="You do not have permission to transfer stock." onConfirm={() => {}} />}
@@ -325,6 +558,26 @@ export function InventoryManagement({
       busy={busy}
       onCancel={() => setPendingMovement(null)}
       onConfirm={() => { void commitMovement(); }}
+    />
+    <ConfirmDialog
+      open={confirmStocktake}
+      title={`Complete stocktake ${stocktake?.reference ?? ""}?`}
+      description={`This posts ${stocktakeVarianceLines.length} audited stock correction(s). Estimated stock-value variance: ${formatCurrency(stocktakeCostImpact)}. The count snapshot and all correction entries will be retained in the audit history.`}
+      confirmLabel="Post corrections"
+      destructive={stocktakeVarianceLines.some((line) => stocktakeVariance(line.expectedGrams, String(line.countedGrams), line.costPerGram).varianceGrams.isNegative())}
+      busy={busy}
+      onCancel={() => setConfirmStocktake(false)}
+      onConfirm={() => { void completeStocktake(); }}
+    />
+    <ConfirmDialog
+      open={confirmCancelStocktake}
+      title={`Cancel stocktake ${stocktake?.reference ?? ""}?`}
+      description="Saved counts will remain in the history, but no stock corrections will be posted. You can start a new stocktake afterward."
+      confirmLabel="Cancel stocktake"
+      destructive
+      busy={busy}
+      onCancel={() => setConfirmCancelStocktake(false)}
+      onConfirm={() => { void cancelStocktake(); }}
     />
   </div>;
 }

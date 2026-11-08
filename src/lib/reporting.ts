@@ -79,6 +79,12 @@ export function calculateProfitMetrics(salesValue: string | number, costOfSales:
   };
 }
 
+export function calculateNetProfit(grossProfit: string | number | null, expenses: Array<string | number>) {
+  if (grossProfit === null) return null;
+  const netPesewas = expenses.reduce((sum, expense) => sum - amountInPesewas(expense), amountInPesewas(grossProfit));
+  return Number(netPesewas) / 100;
+}
+
 function dateOnly(value: string) {
   return new Date(value).toISOString().slice(0, 10);
 }
@@ -233,7 +239,7 @@ export function buildDailyMansoBranchSummary(
     };
     if (movement.type === "TRANSFER_IN") row.amountGivenPesewas += movement.amountPesewas;
     if (movement.type === "TRANSFER_OUT") row.cashReturnedPesewas += movement.amountPesewas;
-    if (movement.type === "ADJUSTMENT_OUT") row.expensesPesewas += movement.amountPesewas;
+    if (movement.type === "ADJUSTMENT_OUT" || movement.type === "EXPENSE") row.expensesPesewas += movement.amountPesewas;
     if (movement.isGoldPurchasePayment && movement.direction === "OUTBOUND") {
       row.goldValuePesewas += movement.amountPesewas;
     }

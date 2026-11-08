@@ -11,16 +11,17 @@ import { formatCurrency, formatCurrencyExact, formatCurrencyWholeGhsTruncated, f
 import { formatCompactNumberTruncated, formatDecimalTruncated } from "../src/lib/decimal-policy";
 import { compareBoardPriceHistory } from "../src/lib/board-prices";
 import { boardPriceSchema } from "../src/lib/validation";
-import { inventoryMovementSchema } from "../src/lib/validation";
+import { inventoryMovementSchema, inventoryStocktakeSchema } from "../src/lib/validation";
 import { ledgerBalances, movementBalance } from "../src/lib/inventory";
+import { stocktakeVariance } from "../src/lib/stocktake";
 import { createBatchCode } from "../src/lib/records";
 import { calculateCashBalances, calculateRunningCashBalances } from "../src/lib/finance";
 import { adjustSaleAllocations } from "../src/lib/sales-allocation";
 import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoAccountSummaries, buildManualMomoStatement } from "../src/lib/manual-momo";
-import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateProfitMetrics } from "../src/lib/reporting";
+import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateNetProfit, calculateProfitMetrics } from "../src/lib/reporting";
 import { calculateMansoBranchPurchase } from "../src/lib/manso-branch";
-import { customerAdvanceSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, mansoBranchActionSchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
+import { customerAdvanceSchema, expenseSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, mansoBranchActionSchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
 
 test("generated batch codes are eight uppercase alphanumeric characters", () => {
   const code = createBatchCode();
@@ -51,6 +52,11 @@ test("profit reports use the allocated receiving cost for full and partial sales
   assert.equal(partialSale.total.toFixed(2), "323171.78");
   assert.equal(partialProfit.profit, 30554.94);
   assert.ok(Math.abs((partialProfit.returnOnCost ?? 0) - 0.104420) < 0.000001);
+});
+
+test("net profit subtracts only approved expenses from gross profit in pesewas", () => {
+  assert.equal(calculateNetProfit(69575.12, ["100.10", "20.02"]), 69455);
+  assert.equal(calculateNetProfit(null, ["10.00"]), null);
 });
 
 test("Manso branch gold uses measured purity and entered cost without board pricing", () => {
@@ -620,6 +626,29 @@ test("inventory mutation validation requires reasons, positive weights, and vali
   }).success, false);
 });
 
+test("stocktake validates batch counts and values physical stock variance at batch cost", () => {
+  assert.equal(inventoryStocktakeSchema.safeParse({ action: "START" }).success, true);
+  assert.equal(inventoryStocktakeSchema.safeParse({
+    action: "SAVE_COUNTS",
+    reconciliationId: "stocktake-id",
+    counts: [{ lineId: "line-id", countedGrams: "0", reason: "" }],
+  }).success, true);
+  assert.equal(inventoryStocktakeSchema.safeParse({
+    action: "SAVE_COUNTS",
+    reconciliationId: "stocktake-id",
+    counts: [{ lineId: "line-id", countedGrams: "-1" }],
+  }).success, false);
+  assert.equal(inventoryStocktakeSchema.safeParse({ action: "COMPLETE", reconciliationId: "stocktake-id" }).success, true);
+  assert.equal(inventoryStocktakeSchema.safeParse({ action: "CANCEL", reconciliationId: "stocktake-id" }).success, true);
+
+  const shortage = stocktakeVariance("1000", "995", "120.50");
+  assert.equal(shortage.varianceGrams.toFixed(5), "-5.00000");
+  assert.equal(shortage.costImpact.toFixed(2), "-602.50");
+  const surplus = stocktakeVariance("995", "1000", "120.50");
+  assert.equal(surplus.varianceGrams.toFixed(5), "5.00000");
+  assert.equal(surplus.costImpact.toFixed(2), "602.50");
+});
+
 test("finance cash balances derive from approved immutable movements", () => {
   const balances = calculateCashBalances([
     { accountId: "cash", direction: "INBOUND", amount: new Prisma.Decimal("500.25"), approvalStatus: "NOT_REQUIRED" },
@@ -696,6 +725,20 @@ test("finance validation covers account metadata, movements, and optional approv
   }).success, false);
   assert.deepEqual(financeSettingsSchema.parse({ adjustmentApprovalThreshold: "1000.00" }), {
     adjustmentApprovalThreshold: "1000.00",
+  });
+
+  test("expense validation requires a GHS amount, valid category, date, and details", () => {
+    const expense = {
+      accountId: "cash-account-1",
+      category: "OTHER",
+      amount: "12.34",
+      movementDate: "2026-11-05T10:00:00.000Z",
+      description: "Repair office door",
+    };
+    assert.equal(expenseSchema.safeParse(expense).success, true);
+    assert.equal(expenseSchema.safeParse({ ...expense, category: "UNSUPPORTED" }).success, false);
+    assert.equal(expenseSchema.safeParse({ ...expense, amount: "0" }).success, false);
+    assert.equal(expenseSchema.safeParse({ ...expense, description: "" }).success, false);
   });
 
   test("manual MOMO validation keeps wallet payments and opening balances constrained", () => {
@@ -923,14 +966,16 @@ test("daily Manso summary reconciles advances, gold, expenses, returns, and runn
     { movementDate: "2026-11-02T10:00:00.000Z", type: "PAYMENT", direction: "OUTBOUND", amount: 300, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: true },
     { movementDate: "2026-11-02T11:00:00.000Z", type: "ADJUSTMENT_OUT", direction: "OUTBOUND", amount: 50, approvalStatus: "APPROVED", isGoldPurchasePayment: false },
     { movementDate: "2026-11-02T12:00:00.000Z", type: "ADJUSTMENT_OUT", direction: "OUTBOUND", amount: 25, approvalStatus: "PENDING", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-02T12:30:00.000Z", type: "EXPENSE", direction: "OUTBOUND", amount: 10, approvalStatus: "APPROVED", isGoldPurchasePayment: false },
+    { movementDate: "2026-11-02T12:45:00.000Z", type: "EXPENSE", direction: "OUTBOUND", amount: 20, approvalStatus: "PENDING", isGoldPurchasePayment: false },
     { movementDate: "2026-11-02T13:00:00.000Z", type: "TRANSFER_OUT", direction: "OUTBOUND", amount: 100, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: false },
     { movementDate: "2026-11-03T09:00:00.000Z", type: "TRANSFER_IN", direction: "INBOUND", amount: 200, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: false },
     { movementDate: "2026-11-03T10:00:00.000Z", type: "PAYMENT", direction: "OUTBOUND", amount: 50, approvalStatus: "NOT_REQUIRED", isGoldPurchasePayment: true },
   ], "2026-11-02", "2026-11-03");
 
   assert.deepEqual(rows, [
-    { date: "2026-11-02", amountGiven: 500.25, goldValue: 300, expenses: 50, cashReturned: 100, balanceLeft: 1050.25 },
-    { date: "2026-11-03", amountGiven: 200, goldValue: 50, expenses: 0, cashReturned: 0, balanceLeft: 1200.25 },
+    { date: "2026-11-02", amountGiven: 500.25, goldValue: 300, expenses: 60, cashReturned: 100, balanceLeft: 1040.25 },
+    { date: "2026-11-03", amountGiven: 200, goldValue: 50, expenses: 0, cashReturned: 0, balanceLeft: 1190.25 },
   ]);
 });
 

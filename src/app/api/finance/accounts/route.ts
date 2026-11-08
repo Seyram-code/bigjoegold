@@ -15,7 +15,7 @@ export async function GET(request: Request) {
         orderBy: [{ isActive: "desc" }, { name: "asc" }],
         select: { id: true, name: true, type: true, currency: true, isActive: true },
       });
-      return Response.json(accounts);
+      return Response.json(accounts, { headers: { "X-Server-Time": new Date().toISOString() } });
     }
     const [accounts, movementTotals] = await Promise.all([
       prisma.cashAccount.findMany({ orderBy: [{ isActive: "desc" }, { name: "asc" }] }),
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     return Response.json(accounts.map((account) => ({
       ...account,
       balance: (balances.get(account.id) ?? new Prisma.Decimal(0)).toFixed(2),
-    })));
+    })), { headers: { "X-Server-Time": new Date().toISOString() } });
   } catch (error) {
     return apiError(error);
   }

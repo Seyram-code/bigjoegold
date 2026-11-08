@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast-provider";
 import { DataTable } from "@/components/ui/data-table";
 import { DateFilter } from "@/components/ui/date-filter";
+import { CalendarPicker } from "@/components/ui/calendar-picker";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { SearchInput } from "@/components/ui/search-input";
 import { CustomerAutocomplete } from "@/components/ui/customer-autocomplete";
@@ -517,8 +518,16 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
               onChange={(customerId) => form.setValue(field.name, customerId, { shouldDirty: true, shouldValidate: true })}
               placeholder="Search customer or choose walk-in"
             /> :
+              field.type === "datetime-local" ? <CalendarPicker
+                id={fieldId}
+                includeTime
+                max={localDateTime()}
+                required
+                value={form.watch(field.name) ?? ""}
+                onChange={(value) => form.setValue(field.name, value, { shouldDirty: true, shouldValidate: true })}
+              /> :
               field.type === "select" ? <select id={fieldId} {...form.register(field.name)} className={fieldControlClass}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> :
-              <input id={fieldId} type={field.type ?? "text"} step={field.step} max={field.type === "datetime-local" ? localDateTime() : undefined} placeholder={field.placeholder} {...form.register(field.name)} className={fieldControlClass} />}
+              <input id={fieldId} type={field.type ?? "text"} step={field.step} placeholder={field.placeholder} {...form.register(field.name)} className={fieldControlClass} />}
         </FormField>;
       })}
       {module === "trades" && <p className="text-[10px] leading-4 text-[#89929e] sm:col-span-2 xl:col-span-3">Price is in Ghana cedis per gram of pure gold. Quantity is gross physical weight in kilograms. Sales are rejected if available FIFO stock is insufficient.</p>}

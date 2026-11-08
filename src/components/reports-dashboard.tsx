@@ -49,6 +49,8 @@ type ReportData = {
     purchases: number;
     costOfSales: number;
     profit: number | null;
+    expenses: number | null;
+    netProfit: number | null;
     grossMargin: number | null;
     returnOnCost: number | null;
     cashIn: number;
@@ -67,6 +69,7 @@ type ReportData = {
   paymentAccounts: PaymentAccount[] | null;
   outstandingTrades: ReportRow[] | null;
   cashMovements: ReportRow[] | null;
+  expenses: ReportRow[] | null;
   stockMovements: ReportRow[] | null;
   staffActivity: ReportRow[] | null;
   boardPrices: ReportRow[] | null;
@@ -82,7 +85,7 @@ type Column = {
   label: string;
   format?: "currency" | "kg" | "grams" | "date" | "day" | "percent";
 };
-type TabId = "overview" | "trading" | "inventory" | "customers" | "customer-advances" | "buyer-financing" | "payments" | "payment-methods" | "cash-flow" | "movements" | "staff" | "board";
+type TabId = "overview" | "trading" | "inventory" | "customers" | "customer-advances" | "buyer-financing" | "payments" | "payment-methods" | "cash-flow" | "expenses" | "movements" | "staff" | "board";
 
 const tabs: Array<{ id: TabId; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -94,6 +97,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
   { id: "payments", label: "Payments & balances" },
   { id: "payment-methods", label: "Account statements" },
   { id: "cash-flow", label: "Cash flow" },
+  { id: "expenses", label: "Expenses" },
   { id: "movements", label: "Stock movements" },
   { id: "staff", label: "Staff activity" },
   { id: "board", label: "Board price history" },
@@ -171,7 +175,9 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
         ["Period to", data.period.to],
         ["Sales value (GHS)", data.totals.sales],
         ["Purchase value (GHS)", data.totals.purchases],
-        ["Profit (GHS)", data.totals.profit],
+        ["Gross profit (GHS)", data.totals.profit],
+        ["Approved expenses (GHS)", data.totals.expenses],
+        ["Net profit after expenses (GHS)", data.totals.netProfit],
         ["Gross margin (% of sales)", data.totals.grossMargin === null ? null : data.totals.grossMargin * 100],
         ["Return on cost (% of cost)", data.totals.returnOnCost === null ? null : data.totals.returnOnCost * 100],
         ["Cash received (GHS)", data.totals.cashIn],
@@ -187,9 +193,12 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
     { name: "Trade transactions", rows: [Object.keys(data.trades[0] ?? { reference: "", type: "", transactionDate: "", customer: "", quantityKg: 0, karat: 0, netAmount: 0, profit: null, grossMargin: null, returnOnCost: null, paidAmount: 0, balance: 0, createdBy: "" }), ...data.trades.map((row) => Object.values(row))] },
   ];
   if (data.inventory) sheets.push({ name: "Current stock", rows: [Object.keys(data.inventory[0] ?? { batchNumber: "", remainingKg: 0, karat: 0, bookValue: 0, location: "" }), ...data.inventory.map((row) => Object.values(row))] });
+  if (data.expenses) {
+    const headers = Object.keys(data.expenses[0] ?? { movementDate: "", reference: "", category: "", account: "", amount: 0, approvalStatus: "", description: "", createdBy: "" });
+    sheets.push({ name: "Expenses", rows: [headers, ...data.expenses.map((row) => headers.map((header) => row[header] ?? null))] });
+  }
   const optional: Array<[string, ReportRow[] | null]> = [
     ["Payments", data.payments],
-    ["Open trade balances", data.outstandingTrades],
     ["Cash movements", data.cashMovements],
     ["Stock movements", data.stockMovements],
     ["Staff activity", data.staffActivity],
@@ -492,6 +501,7 @@ export function ReportsDashboard() {
   const visibleTabs = tabs.filter((tab) => {
     if (tab.id === "inventory" || tab.id === "movements") return data?.inventory !== null;
     if (tab.id === "payments") return data?.payments !== null;
+    if (tab.id === "expenses") return data?.expenses !== null;
     if (tab.id === "payment-methods") return data?.payments !== null && data?.paymentAccounts !== null;
     if (tab.id === "customer-advances" || tab.id === "buyer-financing") return data?.financing !== null;
     if (tab.id === "staff") return data?.staffActivity !== null;
@@ -550,14 +560,14 @@ export function ReportsDashboard() {
   const metrics = data ? [
     ["Purchase value", currency(data.totals.purchases)],
     ["Sales value", currency(data.totals.sales)],
-    ["Profit", data.totals.profit === null ? "Unavailable" : currency(data.totals.profit)],
+    ["Gross profit", data.totals.profit === null ? "Unavailable" : currency(data.totals.profit)],
+    ["Approved expenses", data.totals.expenses === null ? "Restricted" : currency(data.totals.expenses)],
+    ["Net profit after expenses", data.totals.netProfit === null ? "Unavailable" : currency(data.totals.netProfit)],
     ["Gross margin (% of sale)", data.totals.grossMargin === null ? "Unavailable" : `${formatDecimalTruncated(data.totals.grossMargin * 100, 2)}%`],
     ["Return on cost", data.totals.returnOnCost === null ? "Unavailable" : `${formatDecimalTruncated(data.totals.returnOnCost * 100, 2)}%`],
     ["Inventory valuation", data.totals.inventoryValue === null ? "Restricted" : currency(data.totals.inventoryValue)],
     ["Current stock", data.totals.inventoryKg === null ? "Restricted" : weight(data.totals.inventoryKg)],
     ["Net cash flow", currency(data.totals.netCashFlow)],
-    ["Customer balances", data.outstandingTrades ? currency(data.outstandingTrades.filter((row) => row.type === "SALE").reduce((sum, row) => sum + Number(row.balance ?? 0), 0)) : "Restricted"],
-    ["Supplier balances", data.outstandingTrades ? currency(data.outstandingTrades.filter((row) => row.type === "PURCHASE").reduce((sum, row) => sum + Number(row.balance ?? 0), 0)) : "Restricted"],
   ] : [];
 
   let reportContent: ReactNode = null;
@@ -667,7 +677,7 @@ export function ReportsDashboard() {
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3">
           <div className="min-w-0 flex-1 text-left">
             <CardTitle>Daily Manso Branch funds and gold summary</CardTitle>
-            <p className="text-xs text-[#7c8793]">Internal branch purchases are excluded from supplier balances. Balance left reflects funds advanced, gold purchases, recorded expenses, and returned cash.</p>
+            <p className="text-xs text-[#7c8793]">Balance left reflects funds advanced, gold purchases, recorded expenses, and returned cash.</p>
           </div>
           <Button type="button" variant="outline" size="sm" className="report-controls shrink-0" onClick={() => printReportSummary("manso-summary")}>
             <Printer size={14} /> Print summary
@@ -699,13 +709,8 @@ export function ReportsDashboard() {
       <Card><CardHeader><CardTitle>Activity by customer</CardTitle><p className="text-xs text-[#7c8793]">Activity within the selected date range. Select a customer name to view their details.</p></CardHeader><CardContent><ReportTable rows={financingRows} columns={financingColumns} emptyMessage={`No ${customerAdvances ? "supplier gold advance" : "customer gold financing"} activity in this date range.`} onCustomerClick={openCustomer} /></CardContent></Card>
     </>;
   } else if (data && activeTab === "payments") {
-    const outstandingColumns = makeColumns(
-      { key: "type", label: "Transaction type" }, { key: "reference", label: "Reference" }, { key: "customer", label: "Customer / supplier" },
-      { key: "amount", label: "Transaction value", format: "currency" }, { key: "balance", label: "Outstanding", format: "currency" },
-    );
     reportContent = <>
       <Card><CardHeader><CardTitle>Payments recorded during this period</CardTitle></CardHeader><CardContent><ReportTable rows={data.payments ?? []} columns={paymentColumns} /></CardContent></Card>
-      <Card><CardHeader><CardTitle>Outstanding customer and supplier balances</CardTitle></CardHeader><CardContent><ReportTable rows={data.outstandingTrades ?? []} columns={outstandingColumns} /></CardContent></Card>
     </>;
   } else if (data && activeTab === "payment-methods") {
     const payments = data.payments ?? [];
@@ -810,6 +815,25 @@ export function ReportsDashboard() {
         <Metric label="Net cash flow" value={currency(data.totals.netCashFlow)} />
       </div>
       <Card><CardHeader><CardTitle>Account cash movements</CardTitle></CardHeader><CardContent><ReportTable rows={data.cashMovements ?? []} columns={cashColumns} /></CardContent></Card>
+    </>;
+  } else if (data && activeTab === "expenses") {
+    const expenseColumns = makeColumns(
+      { key: "movementDate", label: "Date", format: "date" },
+      { key: "reference", label: "Reference" },
+      { key: "category", label: "Category" },
+      { key: "account", label: "Account" },
+      { key: "amount", label: "Amount", format: "currency" },
+      { key: "approvalStatus", label: "Status" },
+      { key: "description", label: "Details" },
+      { key: "createdBy", label: "Recorded by" },
+    );
+    reportContent = <>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Metric label="Gross profit" value={data.totals.profit === null ? "Unavailable" : currency(data.totals.profit)} />
+        <Metric label="Approved expenses" value={data.totals.expenses === null ? "Restricted" : currency(data.totals.expenses)} />
+        <Metric label="Net profit after expenses" value={data.totals.netProfit === null ? "Unavailable" : currency(data.totals.netProfit)} />
+      </div>
+      <Card><CardHeader><CardTitle>Expense transactions</CardTitle><p className="text-xs text-[#7c8793]">Pending and rejected expenses are listed but do not reduce net profit. Approved expenses are deducted from gross profit.</p></CardHeader><CardContent><ReportTable rows={data.expenses ?? []} columns={expenseColumns} /></CardContent></Card>
     </>;
   } else if (data && activeTab === "movements") {
     const movementColumns = makeColumns(

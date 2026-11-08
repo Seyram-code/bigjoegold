@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   loginNotificationSms,
+  manualMomoClosingSummarySms,
   manualMomoTransactionSms,
   paymentConfirmationSms,
   purchaseConfirmationSms,
@@ -61,6 +62,20 @@ test("manual ledger transaction and login SMS include their record details", () 
   assert.match(login, /sales officer/);
   assert.match(login, /\+233200000000/);
   assert.match(login, /Time:/);
+});
+
+test("end-of-day SMS lists each account balance and the combined total", () => {
+  const message = manualMomoClosingSummarySms("2026-11-06", [
+    { name: "MOMO 1", type: "MOBILE_MONEY", balance: "1250.50" },
+    { name: "Bank 1", type: "BANK", balance: "800.00" },
+    { name: "Cash", type: "CASH", balance: "50.25" },
+  ], "Ama");
+  assert.match(message, /6 Nov 2026/);
+  assert.match(message, /MOMO 1 \(mobile money\): GH₵ 1,250\.50/);
+  assert.match(message, /Bank 1 \(bank\): GH₵ 800\.00/);
+  assert.match(message, /Cash \(cash\): GH₵ 50\.25/);
+  assert.match(message, /Total: GH₵ 2,100\.75/);
+  assert.match(message, /Closed by: Ama/);
 });
 
 test("Wigal rejection logs bounded, redacted provider details", async (t) => {

@@ -235,7 +235,8 @@ export async function POST(request: Request) {
           data: {
             reference: reference("FIN"),
             accountId: branchAccount.id,
-            type: "ADJUSTMENT_OUT",
+            type: "EXPENSE",
+            expenseCategory: "OTHER",
             direction: "OUTBOUND",
             amount,
             movementDate: new Date(input.movementDate),

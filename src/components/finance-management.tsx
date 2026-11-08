@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -22,15 +22,22 @@ type Row = Record<string, unknown>;
 type FinanceAccount = { id: string; name: string; type: string; currency: string; balance?: string; isActive: boolean };
 
 const today = () => new Date().toISOString().slice(0, 10);
-const localDateTime = () => {
-  const date = new Date();
+const localDateTime = (clockOffsetMs = 0) => {
+  const date = new Date(Date.now() + clockOffsetMs);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
 };
 const methods = ["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"];
 
 function message(body: unknown, fallback: string) {
-  return body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : fallback;
+  if (!body || typeof body !== "object" || !("error" in body) || typeof body.error !== "string") return fallback;
+  if (body.error === "Validation failed" && "fields" in body && body.fields && typeof body.fields === "object") {
+    const details = Object.values(body.fields)
+      .flatMap((value) => Array.isArray(value) ? value : [])
+      .filter((value): value is string => typeof value === "string");
+    if (details.length) return `${body.error}: ${details.join(". ")}`;
+  }
+  return body.error;
 }
 
 function statusText(value: unknown) {
@@ -66,6 +73,10 @@ export function FinanceManagement({
   const [paymentProcessingMessage, setPaymentProcessingMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
+  const paymentDateEdited = useRef(false);
+  const openingDateEdited = useRef(false);
+  const movementDateEdited = useRef(false);
   const { success: showToast } = useToast();
   const [payment, setPayment] = useState({ target: "", amount: "", method: "CASH", cashAccountId: "", note: "", paidAt: localDateTime() });
   const [account, setAccount] = useState({ name: "", type: "CASH", currency: "GHS", institution: "", accountReference: "", openingBalance: "0", openingDate: localDateTime() });
@@ -102,9 +113,20 @@ export function FinanceManagement({
         const response = await request;
         const body: unknown = await response.json();
         if (!response.ok) throw new Error(message(body, `Unable to load ${key}`));
-        return [key, body] as const;
+        return { key, body, serverTime: response.headers.get("x-server-time") };
       }));
-      const data = Object.fromEntries(entries) as Record<string, unknown>;
+      const data = Object.fromEntries(entries.map(({ key, body }) => [key, body])) as Record<string, unknown>;
+      const serverTimeHeader = entries.find((entry) => entry.key === "accounts")?.serverTime;
+      if (serverTimeHeader) {
+        const serverTime = Date.parse(serverTimeHeader);
+        if (Number.isFinite(serverTime)) {
+          const offset = serverTime - Date.now();
+          setServerClockOffsetMs(offset);
+          if (!paymentDateEdited.current) setPayment((current) => ({ ...current, paidAt: localDateTime(offset) }));
+          if (!openingDateEdited.current) setAccount((current) => ({ ...current, openingDate: localDateTime(offset) }));
+          if (!movementDateEdited.current) setMovement((current) => ({ ...current, movementDate: localDateTime(offset) }));
+        }
+      }
       setAccounts(Array.isArray(data.accounts) ? data.accounts as FinanceAccount[] : []);
       if (data.overview && typeof data.overview === "object") setSummary(data.overview as Row);
       if (Array.isArray(data.payments)) setPayments(data.payments as Row[]);
@@ -325,7 +347,7 @@ export function FinanceManagement({
             setPayment((current) => ({ ...current, target, amount: selected?.balance ?? "" }));
           }} className={fieldControlClass}><option value="">{loading ? "Loading customers with outstanding balances…" : availablePaymentCandidates.length ? "Select a transaction" : "No transactions with an outstanding balance"}</option>{availablePaymentCandidates.map((item) => <option key={`${item.kind}:${item.id}`} value={`${item.kind}:${item.id}`}>{item.label}</option>)}</select></FormField>
           <FormField label="Amount (GHS)" htmlFor="finance-payment-amount"><GhanaAmountInput id="finance-payment-amount" required min="0.01" step="0.01" readOnly={Boolean(payment.target)} value={payment.amount} onChange={(amount) => setPayment({ ...payment, amount })} className={`${fieldControlClass} ${payment.target ? "bg-[#f7f8fa]" : ""}`} /></FormField>
-          <FormField label="Date and time" htmlFor="finance-payment-date"><CalendarPicker id="finance-payment-date" includeTime max={localDateTime()} required value={payment.paidAt} onChange={(paidAt) => setPayment({ ...payment, paidAt })} /></FormField>
+          <FormField label="Date and time" htmlFor="finance-payment-date"><CalendarPicker id="finance-payment-date" includeTime max={localDateTime(serverClockOffsetMs)} required value={payment.paidAt} onChange={(paidAt) => { paymentDateEdited.current = true; setPayment({ ...payment, paidAt }); }} /></FormField>
           <FormField label="Payment method" htmlFor="finance-payment-method"><select value={payment.method} id="finance-payment-method" onChange={(event) => setPayment({ ...payment, method: event.target.value })} className={fieldControlClass}>{methods.map((item) => <option key={item} value={item}>{statusText(item)}</option>)}</select></FormField>
           <FormField label="Cash / bank account" htmlFor="finance-payment-account"><select required value={payment.cashAccountId} id="finance-payment-account" onChange={(event) => setPayment({ ...payment, cashAccountId: event.target.value })} className={fieldControlClass}><option value="">Select account</option>{activeAccounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></FormField>
           <FormField label="Reference or note" htmlFor="finance-payment-note"><input id="finance-payment-note" maxLength={500} value={payment.note} onChange={(event) => setPayment({ ...payment, note: event.target.value })} className={fieldControlClass} /></FormField>
@@ -344,7 +366,7 @@ export function FinanceManagement({
           <FormField label="Institution / provider" htmlFor="cash-account-institution"><input id="cash-account-institution" value={account.institution} onChange={(event) => setAccount({ ...account, institution: event.target.value })} className={fieldControlClass} /></FormField>
           <FormField label="Account reference (optional)" htmlFor="cash-account-reference"><input id="cash-account-reference" value={account.accountReference} onChange={(event) => setAccount({ ...account, accountReference: event.target.value })} className={fieldControlClass} /></FormField>
           <FormField label="Opening balance" htmlFor="cash-account-opening"><GhanaAmountInput id="cash-account-opening" min="0" step="0.01" value={account.openingBalance} onChange={(openingBalance) => setAccount({ ...account, openingBalance })} className={fieldControlClass} /></FormField>
-          <FormField label="Opening balance date" htmlFor="cash-account-date"><CalendarPicker id="cash-account-date" includeTime max={localDateTime()} value={account.openingDate} onChange={(openingDate) => setAccount({ ...account, openingDate })} /></FormField>
+          <FormField label="Opening balance date" htmlFor="cash-account-date"><CalendarPicker id="cash-account-date" includeTime max={localDateTime(serverClockOffsetMs)} value={account.openingDate} onChange={(openingDate) => { openingDateEdited.current = true; setAccount({ ...account, openingDate }); }} /></FormField>
           <div className="flex items-end"><Button type="submit" variant="gold" disabled={busy}>Create account</Button></div>
         </form>
       </CardContent></Card>}
@@ -360,7 +382,7 @@ export function FinanceManagement({
             <FormField label="Direction" htmlFor="finance-adjust-direction"><select id="finance-adjust-direction" value={movement.direction} onChange={(event) => setMovement({ ...movement, direction: event.target.value })} className={fieldControlClass}><option value="INBOUND">Increase</option><option value="OUTBOUND">Decrease</option></select></FormField>
           </>}
           <FormField label="Amount" htmlFor="finance-movement-amount"><GhanaAmountInput required min="0.01" step="0.01" id="finance-movement-amount" value={movement.amount} onChange={(amount) => setMovement({ ...movement, amount })} className={fieldControlClass} /></FormField>
-          <FormField label="Date" htmlFor="finance-movement-date"><CalendarPicker id="finance-movement-date" includeTime max={localDateTime()} required value={movement.movementDate} onChange={(movementDate) => setMovement({ ...movement, movementDate })} /></FormField>
+          <FormField label="Date" htmlFor="finance-movement-date"><CalendarPicker id="finance-movement-date" includeTime max={localDateTime(serverClockOffsetMs)} required value={movement.movementDate} onChange={(movementDate) => { movementDateEdited.current = true; setMovement({ ...movement, movementDate }); }} /></FormField>
           <FormField label="Reason / reference" htmlFor="finance-movement-reason"><input required minLength={5} maxLength={500} id="finance-movement-reason" value={movement.description} onChange={(event) => setMovement({ ...movement, description: event.target.value })} className={fieldControlClass} /></FormField>
           <div className="flex items-end"><Button type="submit" variant="gold" disabled={busy}>Post movement</Button></div>
         </form>

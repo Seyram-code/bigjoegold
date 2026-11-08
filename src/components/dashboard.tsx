@@ -46,11 +46,10 @@ type DashboardData = {
     salesDensityInPeriod: number | null;
     salesKaratInPeriod: number | null;
     purchasesKgInPeriod: number;
-    purchasesPoundsInPeriod: number;
-    purchasesDownGramsInPeriod: number;
-    purchasesDensityInPeriod: number | null;
-    purchasesKaratInPeriod: number | null;
-    inventoryAverageKarat: number | null;
+    inventoryPounds: number;
+    inventoryDownGrams: number;
+    inventoryDensity: number | null;
+    inventoryKarat: number | null;
     customerCount: number;
     inventoryKg: number;
     inventoryValue: number;
@@ -161,20 +160,20 @@ export function Dashboard({
   const karatTotal = data.inventoryByKarat.reduce((total, item) => total + item.kilograms, 0);
 
   const metrics = [
-    { label: "Total gold purchased", value: formatWeight(summary.purchasesKgInPeriod, "kg"), detail: `${summary.purchasesCount} posted in period`, amount: formatCurrency(summary.purchasesInPeriod), icon: ShoppingCart },
-    { label: "Total grams purchased", value: `${formatDecimalTruncated(summary.purchasesKgInPeriod * 1000, 2)} g`, detail: "Selected period", amount: null, icon: BarChart3 },
-    { label: "Total down weight purchased", value: `${formatDecimalTruncated(summary.purchasesDownGramsInPeriod, 2)} g`, detail: "Selected period", amount: null, icon: BarChart3 },
-    { label: "Total pounds purchased", value: `${formatDecimalTruncated(summary.purchasesPoundsInPeriod, 2)} lb`, detail: "Selected period", amount: null, icon: BarChart3 },
-    { label: "Average density purchased", value: summary.purchasesDensityInPeriod === null ? "—" : formatDecimalTruncated(summary.purchasesDensityInPeriod, 2), detail: "Weighted by received grams", amount: null, icon: Coins },
-    { label: "Average karat purchased", value: summary.purchasesKaratInPeriod === null ? "—" : `${formatDecimalTruncated(summary.purchasesKaratInPeriod, 2)}K`, detail: "Weighted by received grams", amount: null, icon: Coins },
+    { label: "Total gold purchased", value: `${formatDecimalTruncated(summary.inventoryKg, 5)} kg`, detail: "After sales, returns & adjustments", amount: `FIFO value ${formatCurrency(summary.inventoryValue)}`, icon: BarChart3 },
+    { label: "Total grams purchased", value: `${formatDecimalTruncated(summary.inventoryKg * 1000, 2)} g`, detail: "After sales, returns & adjustments", amount: null, icon: BarChart3 },
+    { label: "Total down weight purchased", value: `${formatDecimalTruncated(summary.inventoryDownGrams, 2)} g`, detail: "After sales, returns & adjustments", amount: null, icon: BarChart3 },
+    { label: "Total pounds purchased", value: `${formatDecimalTruncated(summary.inventoryPounds, 2)} lb`, detail: "After sales, returns & adjustments", amount: null, icon: BarChart3 },
+    { label: "Average density purchased", value: summary.inventoryDensity === null ? "—" : formatDecimalTruncated(summary.inventoryDensity, 2), detail: "Weighted by remaining grams", amount: null, icon: Coins },
+    { label: "Average karat purchased", value: summary.inventoryKarat === null ? "—" : `${formatDecimalTruncated(summary.inventoryKarat, 2)}K`, detail: "Weighted by remaining grams", amount: null, icon: Coins },
+    { label: "Current stock (kg)", value: `${formatDecimalTruncated(summary.inventoryKg, 5)} kg`, detail: "Current inventory", amount: `FIFO value ${formatCurrency(summary.inventoryValue)}`, icon: BarChart3 },
+    { label: "Current stock (g)", value: `${formatDecimalTruncated(summary.inventoryKg * 1000, 2)} g`, detail: "Current inventory", amount: null, icon: BarChart3 },
     { label: "Total KG sold", value: formatWeight(summary.salesKgInPeriod, "kg"), detail: `${summary.salesCount} sales recorded in period`, amount: formatCurrency(summary.salesInPeriod), icon: Wallet },
     { label: "Total grams sold", value: `${formatDecimalTruncated(summary.salesGramsInPeriod, 2)} g`, detail: "Selected period", amount: null, icon: BarChart3 },
     { label: "Down weight sold", value: `${formatDecimalTruncated(summary.salesDownGramsInPeriod, 2)} g`, detail: "Selected period", amount: null, icon: BarChart3 },
     { label: "Total pounds sold", value: `${formatDecimalTruncated(summary.salesPoundsInPeriod, 2)} lb`, detail: "Selected period", amount: null, icon: BarChart3 },
     { label: "Average density sold", value: summary.salesDensityInPeriod === null ? "—" : formatDecimalTruncated(summary.salesDensityInPeriod, 2), detail: "Weighted by sold grams", amount: null, icon: Coins },
     { label: "Average karat sold", value: summary.salesKaratInPeriod === null ? "—" : `${formatDecimalTruncated(summary.salesKaratInPeriod, 2)}K`, detail: "Weighted by sold grams", amount: null, icon: Coins },
-    { label: "Current stock (kg)", value: formatWeight(summary.inventoryKg, "kg"), detail: "Current FIFO inventory value", amount: formatCurrency(summary.inventoryValue), icon: BarChart3 },
-    { label: "Current stock (grams)", value: `${formatDecimalTruncated(summary.inventoryKg * 1000, 2)} g`, detail: "Current FIFO inventory weight", amount: null, icon: BarChart3 },
   ];
 
   return <div className="space-y-2.5">

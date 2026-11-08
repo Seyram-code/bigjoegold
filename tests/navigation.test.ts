@@ -42,6 +42,7 @@ test("finance navigation exposes account management, summaries, and reconciliati
   assert.deepEqual(finance?.children?.map((item) => item.label), [
     "Payments Received",
     "Payments Made",
+    "Expenses",
     "Cash and Bank Accounts",
     "Financial Summaries",
     "Transaction Reconciliation",

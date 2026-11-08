@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/authz";
 import { apiError, HttpError } from "@/lib/http";
 import { ledgerBalances } from "@/lib/inventory";
-import { calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "@/lib/dashboard-metrics";
+import { calculateAvailableInventoryMeasurementTotals, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "@/lib/dashboard-metrics";
 
 const zero = () => new Prisma.Decimal(0);
 
@@ -71,7 +71,23 @@ export async function GET(request: Request) {
         }),
         prisma.trade.aggregate({ where: { type: "PURCHASE", status: "POSTED", transactionDate: { gte: fromDate, lte: toDate } }, _sum: { quantityKg: true, totalAmount: true }, _count: true }),
         prisma.customer.count(),
-        prisma.inventoryLot.findMany({ select: { id: true, remainingGrams: true, costPerGram: true, purityBps: true, status: true } }),
+        prisma.inventoryLot.findMany({
+          select: {
+            id: true,
+            remainingGrams: true,
+            originalGrams: true,
+            costPerGram: true,
+            purityBps: true,
+            pounds: true,
+            density: true,
+            status: true,
+            trade: {
+              select: {
+                purchaseMeasurement: { select: { topKg: true, downKg: true, pounds: true, density: true, karat: true } },
+              },
+            },
+          },
+        }),
         prisma.stockMovement.groupBy({
           by: ["inventoryLotId", "type"],
           where: { inventoryLotId: { not: null } },
@@ -157,9 +173,13 @@ export async function GET(request: Request) {
     })).filter((lot) => lot.ledgerGrams.greaterThan(0));
     const inventoryGrams = availableLots.reduce((sum, lot) => sum.plus(lot.ledgerGrams), zero());
     const inventoryCost = availableLots.reduce((sum, lot) => sum.plus(lot.ledgerGrams.mul(lot.costPerGram)), zero());
-    const inventoryAverageKarat = calculateInventoryAverageKarat(availableLots.map((lot) => ({
+    const inventoryMeasurementTotals = calculateAvailableInventoryMeasurementTotals(availableLots.map((lot) => ({
       grams: lot.ledgerGrams,
+      originalGrams: lot.originalGrams,
       purityBps: lot.purityBps,
+      pounds: lot.pounds,
+      density: lot.density,
+      measurement: lot.trade?.purchaseMeasurement ?? null,
     })));
     const receivedMeasurementTotals = calculateReceivedMeasurementTotals(purchaseMeasurements.map((purchase) => ({
       quantityKg: purchase.quantityKg,
@@ -280,7 +300,10 @@ export async function GET(request: Request) {
         purchasesDownGramsInPeriod: receivedMeasurementTotals.downGrams,
         purchasesDensityInPeriod: receivedMeasurementTotals.density,
         purchasesKaratInPeriod: receivedMeasurementTotals.karat,
-        inventoryAverageKarat,
+        inventoryDownGrams: inventoryMeasurementTotals.downGrams,
+        inventoryPounds: inventoryMeasurementTotals.pounds,
+        inventoryDensity: inventoryMeasurementTotals.density,
+        inventoryKarat: inventoryMeasurementTotals.karat,
         salesCount: sales.length,
         purchasesCount: purchases._count,
         customerCount,

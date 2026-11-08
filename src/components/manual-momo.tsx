@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { ArrowDownLeft, ArrowUpRight, Printer, RefreshCw } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Printer, RefreshCw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarPicker } from "@/components/ui/calendar-picker";
@@ -60,6 +60,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
   const [selectedContactId, setSelectedContactId] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingEntry, setSavingEntry] = useState(false);
+  const [closingDay, setClosingDay] = useState(false);
   const [savingAccount, setSavingAccount] = useState<string | null>(null);
   const [savingNewAccount, setSavingNewAccount] = useState(false);
   const [error, setError] = useState("");
@@ -213,6 +214,24 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
     }
   }
 
+  async function closeBusinessDay() {
+    setClosingDay(true);
+    setError("");
+    try {
+      const response = await fetch("/api/manual-momo/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ closingDate: to }),
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      showToast(`End-of-day balances for ${displayDate(`${to}T00:00:00.000Z`)} sent to the owner SMS.`);
+    } catch (closeError) {
+      setError(closeError instanceof Error ? closeError.message : "Unable to send the end-of-day account balances.");
+    } finally {
+      setClosingDay(false);
+    }
+  }
+
   async function createAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSavingNewAccount(true);
@@ -334,8 +353,10 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
           </select></label>
           <label><span className={fieldLabelClass}>From</span><CalendarPicker id="manual-momo-statement-from" value={from} max={to} onChange={setFrom} /></label>
           <label><span className={fieldLabelClass}>To</span><CalendarPicker id="manual-momo-statement-to" value={to} min={from} max={today} onChange={setTo} /></label>
+          {canWrite && <Button type="button" variant="gold" onClick={() => void closeBusinessDay()} disabled={loading || closingDay || !data?.accounts.length}><Send size={15} />{closingDay ? "Sending…" : "Close day & send SMS"}</Button>}
           <Button type="button" variant="gold" onClick={() => window.print()} disabled={loading || !data?.accounts.length}><Printer size={15} /> Print / Save PDF</Button>
         </div>
+        {canWrite && <p className="manual-momo-controls w-full text-xs text-[#7c8793]">Sends all account balances as of the selected To date. This is report-only and does not lock the date or stop further entries.</p>}
       </CardHeader>
       <CardContent>
         <div className="hidden print:block">

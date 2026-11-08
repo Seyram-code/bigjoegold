@@ -1,0 +1,23 @@
+ALTER TABLE `CashMovement`
+  MODIFY `type` ENUM(
+    'OPENING_BALANCE',
+    'PAYMENT',
+    'TRANSFER_IN',
+    'TRANSFER_OUT',
+    'ADJUSTMENT_IN',
+    'ADJUSTMENT_OUT',
+    'EXPENSE'
+  ) NOT NULL,
+  ADD COLUMN `expenseCategory` ENUM(
+    'RENT',
+    'UTILITIES',
+    'SALARIES',
+    'TRANSPORT',
+    'OFFICE_SUPPLIES',
+    'MAINTENANCE',
+    'COMMUNICATION',
+    'BANK_CHARGES',
+    'SECURITY',
+    'ASSAY',
+    'OTHER'
+  ) NULL;

@@ -63,15 +63,25 @@ export function WorkspaceShell({
     const signOutAfterInactivity = async () => {
       if (signingOut) return;
       signingOut = true;
-      const result = await authClient.signOut();
-      if (result.error) {
+      try {
+        const result = await authClient.signOut();
+        if (result.error) {
+          signingOut = false;
+          setSignOutError(`Your session has been inactive for five minutes, but sign-out failed: ${result.error.message || "Please check your connection and sign out manually."}`);
+          timeout = window.setTimeout(checkInactivity, 5000);
+          return;
+        }
+        setSignOutError("");
+        router.replace("/login");
+        router.refresh();
+      } catch (cause) {
         signingOut = false;
-        setSignOutError(`Your session has been inactive for five minutes, but sign-out failed: ${result.error.message || "Please check your connection and sign out manually."}`);
+        const message = cause instanceof Error && cause.message
+          ? cause.message
+          : "Please check your connection and sign out manually.";
+        setSignOutError(`Your session has been inactive for five minutes, but sign-out failed: ${message}`);
         timeout = window.setTimeout(checkInactivity, 5000);
-        return;
       }
-      router.replace("/login");
-      router.refresh();
     };
 
     const checkInactivity = () => {
@@ -139,13 +149,20 @@ export function WorkspaceShell({
   }, [profileOpen]);
 
   async function signOut() {
-    const result = await authClient.signOut();
-    if (result.error) {
-      setSignOutError(result.error.message || "Unable to sign out. Please try again.");
-      return;
+    setSignOutError("");
+    try {
+      const result = await authClient.signOut();
+      if (result.error) {
+        setSignOutError(result.error.message || "Unable to sign out. Please try again.");
+        return;
+      }
+      router.replace("/login");
+      router.refresh();
+    } catch (cause) {
+      setSignOutError(cause instanceof Error && cause.message
+        ? cause.message
+        : "Unable to sign out. Please try again.");
     }
-    router.replace("/login");
-    router.refresh();
   }
 
   async function saveProfile(event: React.FormEvent<HTMLFormElement>) {

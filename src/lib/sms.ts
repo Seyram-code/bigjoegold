@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { formatCurrencyExact, formatWeight } from "@/lib/formatters";
 import { prisma } from "@/lib/prisma";
 
@@ -10,6 +11,7 @@ type SaleSms = { reference: string; customerName?: string | null; quantityKg: st
 type PaymentSms = { reference: string; direction: "INBOUND" | "OUTBOUND"; amount: string | number; method: string; customerName?: string | null; tradeReference?: string | null; recordedBy: string };
 type ManualMomoSms = { reference: string; direction: "INBOUND" | "OUTBOUND"; amount: string | number; accountName: string; accountType: string; customerName: string; transactionReference?: string | null; transactionDate: Date; recordedBy: string };
 type LoginSms = { name: string; email: string; phone: string | null; role: string; loggedInAt: Date };
+type ManualMomoClosingAccount = { name: string; type: string; balance: string | number };
 
 function required(value: string | undefined) { return value?.trim() ?? ""; }
 
@@ -82,6 +84,16 @@ export function manualMomoTransactionSms(notification: ManualMomoSms) {
 export function loginNotificationSms(notification: LoginSms) {
   const phone = notification.phone ? ` Phone: ${notification.phone}.` : "";
   return compact(`BJG login. ${notification.name} (${notification.role.replaceAll("_", " ").toLowerCase()}). Email: ${notification.email}.${phone} Time: ${ghanaDateTime(notification.loggedInAt)}.`);
+}
+
+export function manualMomoClosingSummarySms(closingDate: string, accounts: ManualMomoClosingAccount[], closedBy: string) {
+  const date = new Intl.DateTimeFormat("en-GH", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(`${closingDate}T00:00:00.000Z`));
+  const balances = accounts.map(({ name, type, balance }) => `${name} (${paymentMethodLabel(type)}): ${formatCurrencyExact(balance)}`);
+  const total = accounts.reduce((sum, account) => sum.plus(account.balance), new Prisma.Decimal(0));
+  return compact(`BJG end-of-day balances ${date}. ${balances.join("; ")}. Total: ${formatCurrencyExact(total.toFixed(2))}. Closed by: ${closedBy}.`);
 }
 
 export async function sendOwnerLoginSms(userId: string, loggedInAt: Date) {

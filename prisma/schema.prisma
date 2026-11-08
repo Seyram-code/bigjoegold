@@ -54,6 +54,12 @@ enum InventoryLotStatus {
   QUARANTINED
 }
 
+enum InventoryReconciliationStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 enum SaleCorrectionType {
   RETURN
   REVERSAL
@@ -90,6 +96,21 @@ enum FinanceMovementType {
   TRANSFER_OUT
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
+  EXPENSE
+}
+
+enum ExpenseCategory {
+  RENT
+  UTILITIES
+  SALARIES
+  TRANSPORT
+  OFFICE_SUPPLIES
+  MAINTENANCE
+  COMMUNICATION
+  BANK_CHARGES
+  SECURITY
+  ASSAY
+  OTHER
 }
 
 enum FinanceApprovalStatus {
@@ -100,36 +121,38 @@ enum FinanceApprovalStatus {
 }
 
 model User {
-  id                      String                   @id
+  id                      String                    @id
   name                    String
-  email                   String                   @unique
+  email                   String                    @unique
   phone                   String?
-  accessCodeHash          String?                  @unique
-  accessCodeEncrypted     String?                  @db.VarChar(255)
-  emailVerified           Boolean                  @default(false)
+  accessCodeHash          String?                   @unique
+  accessCodeEncrypted     String?                   @db.VarChar(255)
+  emailVerified           Boolean                   @default(false)
   image                   String?
-  role                    String                   @default("TRADER") @db.VarChar(40)
-  permissionOverrideSet   Boolean                  @default(false)
-  roleRecord              Role                     @relation(fields: [role], references: [code], onDelete: Restrict)
+  role                    String                    @default("TRADER") @db.VarChar(40)
+  permissionOverrideSet   Boolean                   @default(false)
+  roleRecord              Role                      @relation(fields: [role], references: [code], onDelete: Restrict)
   permissionGrants        UserPermission[]
-  isActive                Boolean                  @default(true)
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
+  isActive                Boolean                   @default(true)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
   sessions                Session[]
   accounts                Account[]
   trades                  Trade[]
   saleCorrections         SaleCorrection[]
   stockMovements          StockMovement[]
-  locationsCreated        StorageLocation[]        @relation("StorageLocationCreatedBy")
+  stocktakesStarted       InventoryReconciliation[] @relation("StocktakeStartedBy")
+  stocktakesClosed        InventoryReconciliation[] @relation("StocktakeClosedBy")
+  locationsCreated        StorageLocation[]         @relation("StorageLocationCreatedBy")
   payments                Payment[]
-  customerAdvances        CustomerAdvance[]        @relation("CustomerAdvanceCreatedBy")
-  customerAdvanceRequests CustomerAdvanceRequest[] @relation("CustomerAdvanceRequestCreatedBy")
-  advanceFulfillments     AdvanceFulfillment[]     @relation("AdvanceFulfillmentCreatedBy")
-  buyerFinanceAccounts    BuyerFinanceAccount[]    @relation("BuyerFinanceAccountCreatedBy")
-  buyerFinanceSettlements BuyerFinanceSettlement[] @relation("BuyerFinanceSettlementCreatedBy")
-  cashAccounts            CashAccount[]            @relation("FinanceAccountCreatedBy")
-  cashMovements           CashMovement[]           @relation("FinanceMovementCreatedBy")
-  financeApprovals        CashMovement[]           @relation("FinanceMovementApprovedBy")
+  customerAdvances        CustomerAdvance[]         @relation("CustomerAdvanceCreatedBy")
+  customerAdvanceRequests CustomerAdvanceRequest[]  @relation("CustomerAdvanceRequestCreatedBy")
+  advanceFulfillments     AdvanceFulfillment[]      @relation("AdvanceFulfillmentCreatedBy")
+  buyerFinanceAccounts    BuyerFinanceAccount[]     @relation("BuyerFinanceAccountCreatedBy")
+  buyerFinanceSettlements BuyerFinanceSettlement[]  @relation("BuyerFinanceSettlementCreatedBy")
+  cashAccounts            CashAccount[]             @relation("FinanceAccountCreatedBy")
+  cashMovements           CashMovement[]            @relation("FinanceMovementCreatedBy")
+  financeApprovals        CashMovement[]            @relation("FinanceMovementApprovedBy")
   boardPrices             GoldBoardPrice[]
   manualMomoAccounts      ManualMomoAccount[]
   manualMomoEntries       ManualMomoEntry[]
@@ -358,29 +381,67 @@ model GoldSaleMeasurement {
 }
 
 model InventoryLot {
-  id                String                     @id @default(cuid())
-  tradeId           String?                    @unique
-  trade             Trade?                     @relation(fields: [tradeId], references: [id])
-  batchNumber       String                     @default("")
-  source            String                     @default("")
-  receivedAt        DateTime                   @default(now())
-  originalGrams     Decimal                    @db.Decimal(16, 5)
-  remainingGrams    Decimal                    @db.Decimal(16, 5)
-  costPerGram       Decimal                    @db.Decimal(14, 6)
-  purityBps         Int
-  density           Decimal?                   @db.Decimal(24, 8)
-  pounds            Decimal?                   @db.Decimal(16, 8)
-  status            InventoryLotStatus         @default(ACTIVE)
-  storageLocationId String?
-  storageLocation   StorageLocation?           @relation(fields: [storageLocationId], references: [id], onDelete: SetNull)
-  createdAt         DateTime                   @default(now())
-  allocations       InventoryAllocation[]
-  returnAllocations SaleCorrectionAllocation[]
-  stockMovements    StockMovement[]
+  id                  String                        @id @default(cuid())
+  tradeId             String?                       @unique
+  trade               Trade?                        @relation(fields: [tradeId], references: [id])
+  batchNumber         String                        @default("")
+  source              String                        @default("")
+  receivedAt          DateTime                      @default(now())
+  originalGrams       Decimal                       @db.Decimal(16, 5)
+  remainingGrams      Decimal                       @db.Decimal(16, 5)
+  costPerGram         Decimal                       @db.Decimal(14, 6)
+  purityBps           Int
+  density             Decimal?                      @db.Decimal(24, 8)
+  pounds              Decimal?                      @db.Decimal(16, 8)
+  status              InventoryLotStatus            @default(ACTIVE)
+  storageLocationId   String?
+  storageLocation     StorageLocation?              @relation(fields: [storageLocationId], references: [id], onDelete: SetNull)
+  createdAt           DateTime                      @default(now())
+  allocations         InventoryAllocation[]
+  returnAllocations   SaleCorrectionAllocation[]
+  stockMovements      StockMovement[]
+  reconciliationLines InventoryReconciliationLine[]
 
   @@index([remainingGrams, createdAt])
   @@index([batchNumber])
   @@index([storageLocationId, status])
+}
+
+model InventoryReconciliation {
+  id          String                        @id @default(cuid())
+  reference   String                        @unique
+  activeKey   String?                       @unique @db.VarChar(16)
+  status      InventoryReconciliationStatus @default(IN_PROGRESS)
+  startedAt   DateTime                      @default(now())
+  closedAt    DateTime?
+  createdById String
+  createdBy   User                          @relation("StocktakeStartedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  closedById  String?
+  closedBy    User?                         @relation("StocktakeClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  lines       InventoryReconciliationLine[]
+
+  @@index([status, startedAt])
+}
+
+model InventoryReconciliationLine {
+  id               String                  @id @default(cuid())
+  reconciliationId String
+  reconciliation   InventoryReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  inventoryLotId   String
+  inventoryLot     InventoryLot            @relation(fields: [inventoryLotId], references: [id], onDelete: Restrict)
+  batchNumber      String                  @db.VarChar(120)
+  locationName     String                  @db.VarChar(120)
+  expectedGrams    Decimal                 @db.Decimal(16, 5)
+  countedGrams     Decimal?                @db.Decimal(16, 5)
+  varianceGrams    Decimal                 @default(0) @db.Decimal(16, 5)
+  costPerGram      Decimal                 @db.Decimal(14, 6)
+  reason           String?                 @db.Text
+  correctionRef    String?                 @db.VarChar(191)
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@unique([reconciliationId, inventoryLotId])
+  @@index([reconciliationId, countedGrams])
 }
 
 model StorageLocation {
@@ -679,6 +740,7 @@ model CashMovement {
   amount          Decimal               @db.Decimal(16, 2)
   movementDate    DateTime
   description     String?               @db.Text
+  expenseCategory ExpenseCategory?
   paymentId       String?               @unique
   payment         Payment?              @relation(fields: [paymentId], references: [id], onDelete: SetNull)
   transferGroupId String?               @db.VarChar(191)

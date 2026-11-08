@@ -85,6 +85,7 @@ export const workspaceNavigation: NavigationItem[] = [
     label: "Finance", href: "/finance/accounts", children: [
       { label: "Payments Received", href: "/finance/payments-received", permission: "payments" },
       { label: "Payments Made", href: "/finance/payments-made", permission: "payments" },
+      { label: "Expenses", href: "/expenses", permission: "payments" },
       { label: "Cash and Bank Accounts", href: "/finance/accounts", permission: "reports" },
       { label: "Financial Summaries", href: "/finance/summaries", permission: "reports" },
       { label: "Transaction Reconciliation", href: "/finance/reconciliation", permission: "payments" },
@@ -122,6 +123,7 @@ const views: WorkspaceView[] = [
   { href: "/gold-price/settings", label: "Price Settings", module: "board-prices", permission: "board" },
   { href: "/finance/payments-received", label: "Payments Received", module: "payments", permission: "payments", filter: "inbound" },
   { href: "/finance/payments-made", label: "Payments Made", module: "payments", permission: "payments", filter: "outbound" },
+  { href: "/expenses", label: "Expenses", module: "payments", permission: "payments" },
   { href: "/finance/financing", label: "Financing", module: "payments", permission: "payments" },
   { href: "/finance/customer-advances", label: "Supplier Gold Advances", module: "payments", permission: "payments" },
   { href: "/finance/buyer-financing", label: "Customer Gold Financing", module: "payments", permission: "payments" },

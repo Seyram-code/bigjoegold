@@ -20,12 +20,46 @@ type CalendarPickerProps = {
 
 const datePart = (value: string) => value.slice(0, 10);
 const localDateString = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const localDateTimeValue = (date: Date) => {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 16);
+};
 const parseDate = (value: string) => {
   const [year, month, day] = datePart(value).split("-").map(Number);
   return year && month && day ? new Date(year, month - 1, day) : null;
 };
 const monthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
 const monthTitle = (date: Date) => date.toLocaleDateString("en-GH", { month: "long", year: "numeric" });
+const MAX_CLOCK_CACHE_MS = 60_000;
+let cachedClockOffsetMs: number | null = null;
+let cachedClockAt = 0;
+let clockRequest: Promise<number> | null = null;
+
+function getServerClockOffset() {
+  if (cachedClockOffsetMs !== null && Date.now() - cachedClockAt < MAX_CLOCK_CACHE_MS) {
+    return Promise.resolve(cachedClockOffsetMs);
+  }
+  if (clockRequest) return clockRequest;
+
+  clockRequest = (async () => {
+    const startedAt = Date.now();
+    const response = await fetch("/api/clock", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Unable to synchronize date and time (${response.status})`);
+    const body: unknown = await response.json();
+    const receivedAt = Date.now();
+    if (!body || typeof body !== "object" || !("now" in body) || typeof body.now !== "string") {
+      throw new Error("The time service returned an invalid response");
+    }
+    const serverTime = Date.parse(body.now);
+    if (!Number.isFinite(serverTime)) throw new Error("The time service returned an invalid timestamp");
+    cachedClockOffsetMs = serverTime - (startedAt + receivedAt) / 2;
+    cachedClockAt = receivedAt;
+    return cachedClockOffsetMs;
+  })().finally(() => {
+    clockRequest = null;
+  });
+  return clockRequest;
+}
 
 function displayValue(value: string, includeTime: boolean) {
   const date = parseDate(value);
@@ -58,15 +92,91 @@ export function CalendarPicker({
   const [open, setOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(() => monthStart(parseDate(value) ?? new Date()));
   const [selectedTime, setSelectedTime] = useState(() => value.length >= 16 ? value.slice(11, 16) : "12:00");
+  const initialValue = useRef(value);
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const includeTimeRef = useRef(includeTime);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+  includeTimeRef.current = includeTime;
+  const [clockOffsetMs, setClockOffsetMs] = useState<number | null>(null);
+  const [clockSyncError, setClockSyncError] = useState<string | null>(null);
+  const [, setClockTick] = useState(0);
+  const serverNow = clockOffsetMs === null ? null : new Date(Date.now() + clockOffsetMs);
+  const today = serverNow ?? new Date();
+  const serverMax = serverNow ? localDateTimeValue(serverNow) : "";
+  const browserToday = new Date();
+  const browserTodayValues = [localDateString(browserToday), browserToday.toISOString().slice(0, 10)];
+  const serverDateMax = serverNow ? localDateString(serverNow) : "";
+  const effectiveMax = includeTime
+    ? serverMax || max
+    : max && serverDateMax && browserTodayValues.includes(datePart(max)) ? serverDateMax : max;
   const selectedDate = parseDate(value);
   const minDate = min ? datePart(min) : "";
-  const maxDate = max ? datePart(max) : "";
+  const maxDate = effectiveMax ? datePart(effectiveMax) : "";
   const firstYear = min ? Number(minDate.slice(0, 4)) : 1900;
-  const lastYear = max ? Number(maxDate.slice(0, 4)) : new Date().getFullYear() + 10;
+  const lastYear = effectiveMax ? Number(maxDate.slice(0, 4)) : new Date().getFullYear() + 10;
   const firstYearOption = Math.min(firstYear, visibleMonth.getFullYear());
   const lastYearOption = Math.max(lastYear, visibleMonth.getFullYear());
   const years = Array.from({ length: lastYearOption - firstYearOption + 1 }, (_, index) => firstYearOption + index);
   const months = Array.from({ length: 12 }, (_, index) => new Date(2000, index, 1).toLocaleDateString("en-GH", { month: "long" }));
+
+  useEffect(() => {
+    let active = true;
+    void getServerClockOffset().then((offset) => {
+      if (!active) return;
+      setClockOffsetMs(offset);
+      const currentValue = valueRef.current;
+      if (!includeTimeRef.current) {
+        const browserTodayValues = [localDateString(new Date()), new Date().toISOString().slice(0, 10)];
+        const serverDate = localDateString(new Date(Date.now() + offset));
+        if (initialValue.current === currentValue && browserTodayValues.includes(datePart(currentValue)) && currentValue !== serverDate) {
+          onChangeRef.current(serverDate);
+        }
+        return;
+      }
+      if (currentValue.length < 16) return;
+      const serverNowMs = Date.now() + offset;
+      const currentSelectedAt = new Date(currentValue).getTime();
+      const initialWasSetToCurrentTime = initialValue.current === currentValue
+        && Math.abs(currentSelectedAt - Date.now()) <= 15 * 60_000;
+      if (currentSelectedAt > serverNowMs || initialWasSetToCurrentTime) {
+        const synchronizedValue = localDateTimeValue(new Date(Math.floor(serverNowMs / 60_000) * 60_000));
+        if (synchronizedValue !== currentValue) onChangeRef.current(synchronizedValue);
+      }
+      setClockSyncError(null);
+    }).catch((error: unknown) => {
+      console.error("Unable to synchronize calendar with server time", error);
+      if (active) setClockSyncError("Could not synchronize with server time. Please refresh before recording this date.");
+    });
+    const interval = window.setInterval(() => {
+      setClockTick(Date.now());
+      if (cachedClockOffsetMs === null || Date.now() - cachedClockAt >= MAX_CLOCK_CACHE_MS) {
+        void getServerClockOffset().then((offset) => {
+          if (active) {
+            setClockOffsetMs(offset);
+            setClockSyncError(null);
+          }
+        }).catch((error: unknown) => {
+          console.error("Unable to refresh calendar server time", error);
+          if (active) setClockSyncError("Could not synchronize with server time. Please refresh before recording this date.");
+        });
+      }
+    }, 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (clockOffsetMs === null || !includeTime || value.length < 16) return;
+    const serverNowMs = Date.now() + clockOffsetMs;
+    if (new Date(value).getTime() > serverNowMs) {
+      const synchronizedValue = localDateTimeValue(new Date(Math.floor(serverNowMs / 60_000) * 60_000));
+      if (synchronizedValue !== value) onChange(synchronizedValue);
+    }
+  }, [clockOffsetMs, includeTime, onChange, value]);
 
   useEffect(() => {
     if (!open) return;
@@ -102,7 +212,7 @@ export function CalendarPicker({
     const day = localDateString(date);
     const selected = `${day}T${time}`;
     if (min && day === minDate && min.length >= 16 && selected < min.slice(0, 16)) return min.slice(11, 16);
-    if (max && day === maxDate && max.length >= 16 && selected > max.slice(0, 16)) return max.slice(11, 16);
+    if (effectiveMax && day === maxDate && effectiveMax.length >= 16 && selected > effectiveMax.slice(0, 16)) return effectiveMax.slice(11, 16);
     return time;
   }
 
@@ -139,7 +249,7 @@ export function CalendarPicker({
   const restrictByTime = (date: Date, hour: number, minute: number) => {
     const day = localDateString(date);
     const current = `${day}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-    return Boolean((min && day === minDate && current < min.slice(0, 16)) || (max && day === maxDate && current > max.slice(0, 16)));
+    return Boolean((min && day === minDate && current < min.slice(0, 16)) || (effectiveMax && day === maxDate && current > effectiveMax.slice(0, 16)));
   };
 
   return (
@@ -187,6 +297,7 @@ export function CalendarPicker({
       </div>
 
       {open && <div id={`${id}-calendar`} role="dialog" aria-label="Choose date" className="absolute left-0 top-[calc(100%+6px)] z-[80] w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-[#e8ebef] bg-white p-3.5 shadow-[0_16px_48px_rgba(23,33,47,.18)]">
+        {clockSyncError && <p role="alert" className="mb-2 text-xs text-red-700">{clockSyncError}</p>}
         <div className="mb-3 flex items-center justify-between">
           <button type="button" aria-label="Previous month" onClick={() => setVisibleMonth((date) => new Date(date.getFullYear(), date.getMonth() - 1, 1))} className="grid size-8 place-items-center rounded-lg text-[#637083] hover:bg-[#f7f8fa] hover:text-[#9a6a1d]"><ChevronLeft size={17} /></button>
           <div className="flex items-center gap-1">
@@ -244,13 +355,13 @@ export function CalendarPicker({
               <option>PM</option>
             </select>
           </div>
-          {selectedDate && ((min && min.length >= 16 && localDateString(selectedDate) === minDate && restrictByTime(selectedDate, selectedHour, selectedMinute)) || (max && max.length >= 16 && localDateString(selectedDate) === maxDate && restrictByTime(selectedDate, selectedHour, selectedMinute))) && <AlertDialog open title="Invalid time" description="Choose a time within the allowed range." onConfirm={() => {}} />}
+          {selectedDate && ((min && min.length >= 16 && localDateString(selectedDate) === minDate && restrictByTime(selectedDate, selectedHour, selectedMinute)) || (effectiveMax && effectiveMax.length >= 16 && localDateString(selectedDate) === maxDate && restrictByTime(selectedDate, selectedHour, selectedMinute))) && <AlertDialog open title="Invalid time" description="Choose a time within the allowed range." onConfirm={() => {}} />}
         </div>}
 
         <div className="mt-3 flex items-center justify-between border-t border-[#edf0f3] pt-2.5">
           {!required ? <button type="button" onClick={() => { onChange(""); setOpen(false); }} className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#75808d] hover:bg-[#f7f8fa]">Clear</button> : <span />}
           <div className="flex gap-2">
-            <button type="button" disabled={Boolean((minDate && localDateString(new Date()) < minDate) || (maxDate && localDateString(new Date()) > maxDate))} onClick={() => selectDate(new Date())} className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#795719] hover:bg-[#f5e3b0] disabled:cursor-not-allowed disabled:opacity-40">Today</button>
+            <button type="button" disabled={Boolean((minDate && localDateString(today) < minDate) || (maxDate && localDateString(today) > maxDate))} onClick={() => selectDate(today)} className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#795719] hover:bg-[#f5e3b0] disabled:cursor-not-allowed disabled:opacity-40">Today</button>
             {includeTime && <button type="button" onClick={() => setOpen(false)} className="rounded-lg bg-[#17212f] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#26384d]">Done</button>}
           </div>
         </div>

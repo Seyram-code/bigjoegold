@@ -13,6 +13,7 @@ import { FinancingManagement } from "@/components/financing-management";
 import { ManualMomo } from "@/components/manual-momo";
 import { ManualMomoContacts } from "@/components/manual-momo-contacts";
 import { MansoBranchManagement } from "@/components/manso-branch-management";
+import { ExpensesManagement } from "@/components/expenses-management";
 import { getWorkspaceView, type WorkspaceModule, type WorkspaceView } from "@/lib/workspace-navigation";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,10 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const user = await getCurrentUser();
   if (view.permission && (!user || !can(user.role, readPermission[view.permission], user.permissions))) notFound();
   if (view.module === "settings") return <SettingsPage />;
+  if (path === "/expenses") return <ExpensesManagement
+    canManage={Boolean(user && can(user.role, "finance:manage", user.permissions))}
+    canApprove={Boolean(user && can(user.role, "finance:approve", user.permissions))}
+  />;
   if (path === "/finance/financing") return <FinancingManagement
     canWrite={Boolean(user && can(user.role, "payments:write", user.permissions))}
     canCreateCustomer={Boolean(user && can(user.role, "customers:write", user.permissions))}

@@ -17,7 +17,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       await tx.$queryRaw`SELECT id FROM CashMovement WHERE id = ${id} FOR UPDATE`;
       const current = await tx.cashMovement.findUnique({ where: { id } });
       if (!current || current.approvalStatus !== "PENDING") throw new HttpError("Adjustment is not awaiting approval", 409);
-      if (current.createdById === user.id) throw new HttpError("The person who submitted an adjustment cannot approve it", 403);
       await tx.$queryRaw`SELECT id FROM CashAccount WHERE id = ${current.accountId} FOR UPDATE`;
       if (decision === "APPROVE" && current.direction === "OUTBOUND") {
         const rows = await tx.cashMovement.findMany({
@@ -40,7 +39,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
       await addAudit(tx, {
         userId: user.id,
-        action: decision === "APPROVE" ? "finance.adjustment.approved" : "finance.adjustment.rejected",
+        action: current.type === "EXPENSE"
+          ? decision === "APPROVE" ? "finance.expense.approved" : "finance.expense.rejected"
+          : decision === "APPROVE" ? "finance.adjustment.approved" : "finance.adjustment.rejected",
         entity: "CashMovement",
         entityId: id,
         details: {
