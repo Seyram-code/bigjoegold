@@ -274,7 +274,7 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
               setRepaymentAccountId(event.target.value);
               setRepaymentAmount("");
             }} className={fieldControlClass}>
-              {repayableAccounts.map((account) => <option key={account.id} value={account.id}>{account.customer.name} · {account.reference} · Owes {formatCurrency(account.balance)}</option>)}
+              {repayableAccounts.map((account) => <option key={account.id} value={account.id}>{account.customer.name} · Owes {formatCurrency(account.balance)}</option>)}
             </select>
           </FormField>
           <FormField label="Amount received (GHS)" htmlFor="buyer-finance-repayment-amount"><GhanaAmountInput id="buyer-finance-repayment-amount" required min="0.01" max={repaymentAccount ? Number(repaymentAccount.balance).toFixed(2) : undefined} step="0.01" value={repaymentAmount} onChange={setRepaymentAmount} className={fieldControlClass} /></FormField>
