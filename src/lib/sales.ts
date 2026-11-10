@@ -91,7 +91,10 @@ export async function postSale(
     const customerId = advanceRequest?.advance.customerId ?? (input.customerId || null);
     if (customerId) {
       const customer = await tx.customer.findUnique({ where: { id: customerId } });
-      if (!customer || !customer.isActive || customer.kind !== "BUYER") throw new HttpError("Select an active buyer", 400);
+      const isSupplierFulfillment = advanceRequest !== null && customer?.kind === "SUPPLIER";
+      if (!customer || !customer.isActive || (customer.kind !== "BUYER" && !isSupplierFulfillment)) {
+        throw new HttpError("Sales require an active buyer; supplier gold is only allowed when fulfilling a gold request", 400);
+      }
     }
     const lotIds = [...allocationsByLot.keys()].sort();
     await tx.$queryRaw`SELECT id FROM InventoryLot WHERE id IN (${Prisma.join(lotIds)}) ORDER BY id FOR UPDATE`;

@@ -63,6 +63,10 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const [boardPrice, setBoardPrice] = useState<BoardPrice | null>(null);
   const [selectedAdvanceId, setSelectedAdvanceId] = useState("");
   const [selectedRequestId, setSelectedRequestId] = useState("");
+  const [requestAdvanceId, setRequestAdvanceId] = useState("");
+  const [requestGrams, setRequestGrams] = useState("");
+  const [requestGoldUnit, setRequestGoldUnit] = useState<"g" | "kg">("g");
+  const [requestNote, setRequestNote] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [openingBalanceAmount, setOpeningBalanceAmount] = useState("");
@@ -184,6 +188,8 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       setBoardPrice(advanceData.currentBoardPrice ?? null);
       if (formulaBody && "version" in formulaBody) setFormulaRules(formulaBody);
       setSelectedAdvanceId((current) => nextAdvances.some((advance) => advance.id === current) ? current : nextAdvances[0]?.id ?? "");
+      const requestAdvanceIds = new Set(nextAdvances.map((advance) => advance.id));
+      setRequestAdvanceId((current) => requestAdvanceIds.has(current) ? current : requestAdvanceIds.values().next().value ?? "");
       const nextOpenRequestIds = new Set(nextAdvances.flatMap((advance) => advance.requests
         .filter((request) => Number(request.remainingGrams) > 0)
         .map((request) => request.id)));
@@ -191,8 +197,10 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       setCustomerId((current) => current || nextBuyers[0]?.id || "");
       setSupplierId((current) => nextSuppliers.some((supplier) => supplier.id === current) ? current : nextSuppliers[0]?.id ?? "");
       setAccountId("");
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load customer advances");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -206,7 +214,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const selectedAdvance = advances.find((advance) => advance.id === selectedAdvanceId);
   const selectedSupplier = customers.find((customer) => customer.id === supplierId && customer.kind === "SUPPLIER");
   const openRequests = advances.flatMap((advance) => advance.requests
-    .filter((request) => advance.customer.kind === "BUYER" && Number(request.remainingGrams) > 0)
+    .filter((request) => Number(request.remainingGrams) > 0)
     .map((request) => ({ ...request, advance, customer: advance.customer })));
   const selectedRequest = openRequests.find((request) => request.id === selectedRequestId);
   const selectableFulfillmentLots = lots.filter((lot) => lot.status === "ACTIVE"
@@ -379,6 +387,48 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     }
   }
 
+  async function submitGoldRequest(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (!requestAdvanceId || !requestGrams) {
+      setError("Select a customer advance and enter the requested gold weight.");
+      return;
+    }
+    const requestedGramsInGrams = requestGoldUnit === "kg"
+      ? new Prisma.Decimal(requestGrams).mul(1000).toString()
+      : requestGrams;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/customer-advances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "CREATE_REQUEST",
+          advanceId: requestAdvanceId,
+          requestedGrams: requestedGramsInGrams,
+          note: requestNote,
+        }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to record the gold request"));
+      if (!body || typeof body !== "object" || !("id" in body) || typeof body.id !== "string") {
+        throw new Error("The gold request was saved, but it could not be selected. Refresh the page to load it.");
+      }
+      setSelectedRequestId(body.id);
+      setRequestGrams("");
+      setRequestNote("");
+      const refreshed = await load();
+      const advance = advances.find((item) => item.id === requestAdvanceId);
+      if (refreshed) {
+        showToast(`Gold request recorded${advance ? ` for ${advance.customer.name}` : ""}. It is now selected under Fulfill requested gold.`);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to record the gold request");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function fulfillRequest(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -512,7 +562,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
             {canCreateCustomer && <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => { setError(""); setShowCustomerForm(true); }}><Plus size={14} /> Add new customer</Button>}
           </div>
           <FormField label="Amount received (GHS)" htmlFor="advance-amount"><GhanaAmountInput id="advance-amount" min="0.01" step="0.01" value={amount} onChange={setAmount} className={fieldControlClass} /></FormField>
-          <FormField label="Requested gold" htmlFor="advance-requested-grams" hint="Optional. You can also record a request later." className="sm:col-span-2">
+          <FormField label="Requested gold" htmlFor="advance-requested-grams" hint="Optional. You can also add a request to an existing advance below." className="sm:col-span-2">
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_8rem] gap-2">
               <input id="advance-requested-grams" type="number" min={requestedGoldUnit === "kg" ? "0.00000001" : "0.00001"} step={requestedGoldUnit === "kg" ? "0.00000001" : "0.00001"} value={requestedGrams} onChange={(event) => setRequestedGrams(event.target.value)} className={`${fieldControlClass} min-w-0`} />
               <select aria-label="Requested gold unit" value={requestedGoldUnit} onChange={(event) => setRequestedGoldUnit(event.target.value as "g" | "kg")} className={fieldControlClass}>
@@ -578,10 +628,37 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       </Card>
 
       <Card>
+        <CardHeader><CardTitle>Record a gold request for an existing advance</CardTitle></CardHeader>
+        <CardContent>
+          <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { void submitGoldRequest(event); }}>
+            <FormField label="Buyer or supplier advance" htmlFor="request-advance">
+              <select id="request-advance" required value={requestAdvanceId} onChange={(event) => setRequestAdvanceId(event.target.value)} className={fieldControlClass}>
+                <option value="">Select a customer advance</option>
+                {advances.map((advance) => <option key={advance.id} value={advance.id}>{advance.customer.name} · {advance.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {advance.reference}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Requested gold" htmlFor="request-gold-grams">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_8rem] gap-2">
+                <input id="request-gold-grams" type="number" min={requestGoldUnit === "kg" ? "0.00000001" : "0.00001"} step={requestGoldUnit === "kg" ? "0.00000001" : "0.00001"} value={requestGrams} onChange={(event) => setRequestGrams(event.target.value)} className={`${fieldControlClass} min-w-0`} />
+                <select aria-label="Requested gold unit" value={requestGoldUnit} onChange={(event) => setRequestGoldUnit(event.target.value as "g" | "kg")} className={fieldControlClass}>
+                  <option value="g">Grams</option>
+                  <option value="kg">KG</option>
+                </select>
+              </div>
+            </FormField>
+            <FormField label="Request note" htmlFor="request-gold-note"><input id="request-gold-note" value={requestNote} onChange={(event) => setRequestNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
+            <div className="flex items-end">
+              <Button type="submit" variant="gold" disabled={busy || loading || !requestAdvanceId || !requestGrams}><WalletCards size={15} /> {busy ? "Saving…" : "Record gold request"}</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle>Fulfill requested gold</CardTitle></CardHeader>
         <CardContent>
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={fulfillRequest}>
-            <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setSelectedLotIds([]); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {formatWeight(request.remainingGrams, "g", 2)} requested (optional)</option>)}</select></FormField>
+            <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setSelectedLotIds([]); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {request.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {formatWeight(request.remainingGrams, "g", 2)} requested</option>)}</select></FormField>
             <FormField label="Select stock batches" htmlFor="fulfill-batches"><StockAutocomplete id="fulfill-batches" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableFulfillmentLots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
             <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedFulfillmentBatches}><Plus size={14} /> Add selected batches</Button></div>
             {selectedLotIds.length > 0 && <p className="text-xs text-[#89929d] sm:col-span-2">Selected batches are added with their available weights. Adjust each release amount below if needed.</p>}

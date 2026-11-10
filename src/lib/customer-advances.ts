@@ -192,9 +192,6 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
     }
 
     const advance = await ensureAdvanceLocked(tx, input.advanceId);
-    if (advance.customer.kind !== "BUYER") {
-      throw new HttpError("Gold requests can only be created for buyer advances", 400);
-    }
     return createGoldRequest(tx, advance, input.requestedGrams, input.note, userId);
   });
 }

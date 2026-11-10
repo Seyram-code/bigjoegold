@@ -447,6 +447,15 @@ test("supplier opening debt stays out of cash receipts and is reduced by receive
   assert.equal(balance.toFixed(2), "-63850.00");
 });
 
+test("supplier gold fulfillment increases the amount owed to Big Joe", () => {
+  const balance = calculateCustomerAdvanceBalance(
+    new Prisma.Decimal("-73850"),
+    [{ direction: "INBOUND", amount: new Prisma.Decimal("10000") }],
+    [{ amount: new Prisma.Decimal("5000") }],
+  );
+  assert.equal(balance.toFixed(2), "-68850.00");
+});
+
 test("customer validation supports alternate phone and archive-only updates", () => {
   const customer = customerSchema.safeParse({
     name: "Example Customer",
