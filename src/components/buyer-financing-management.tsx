@@ -64,11 +64,17 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [customerId, setCustomerId] = useState("");
   const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [repaymentAccountId, setRepaymentAccountId] = useState("");
   const [amount, setAmount] = useState("");
   const [cashAccountId, setCashAccountId] = useState("");
   const [method, setMethod] = useState<(typeof methods)[number]>("CASH");
   const [paidAt, setPaidAt] = useState(localDateTime);
   const [note, setNote] = useState("");
+  const [repaymentAmount, setRepaymentAmount] = useState("");
+  const [repaymentCashAccountId, setRepaymentCashAccountId] = useState("");
+  const [repaymentMethod, setRepaymentMethod] = useState<(typeof methods)[number]>("CASH");
+  const [repaymentPaidAt, setRepaymentPaidAt] = useState(localDateTime);
+  const [repaymentNote, setRepaymentNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
@@ -96,7 +102,12 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
       setCashAccounts(nextCashAccounts);
       setCustomerId((current) => current || nextCustomers[0]?.id || "");
       setSelectedAccountId((current) => nextAccounts.some((account) => account.id === current) ? current : nextAccounts[0]?.id || "");
+      const repayableAccounts = nextAccounts.filter((account) => Number(account.balance) > 0);
+      setRepaymentAccountId((current) => repayableAccounts.some((account) => account.id === current)
+        ? current
+        : repayableAccounts[0]?.id || "");
       setCashAccountId((current) => nextCashAccounts.some((account) => account.id === current) ? current : "");
+      setRepaymentCashAccountId((current) => nextCashAccounts.some((account) => account.id === current) ? current : "");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load buyer financing accounts");
     } finally {
@@ -156,14 +167,61 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
     }
   }
 
+  async function submitRepayment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const repaymentAccount = accounts.find((account) => account.id === repaymentAccountId);
+    if (!repaymentAccount || Number(repaymentAccount.balance) <= 0) {
+      setError("Select a buyer financing account before recording a repayment.");
+      return;
+    }
+    if (!repaymentCashAccountId) {
+      setError("Select the cash, bank, or Mobile Money account receiving the repayment.");
+      return;
+    }
+    setBusy(true);
+    setPaymentProcessing(true);
+    try {
+      const response = await fetch("/api/buyer-financing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "REPAY",
+          accountId: repaymentAccount.id,
+          amount: repaymentAmount,
+          cashAccountId: repaymentCashAccountId,
+          method: repaymentMethod,
+          paidAt: new Date(repaymentPaidAt).toISOString(),
+          note: repaymentNote,
+        }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to record the buyer repayment"));
+      if (!body || typeof body !== "object" || !("paymentId" in body) || typeof body.paymentId !== "string") {
+        throw new Error("The repayment was saved, but its receipt could not be opened. Find it in buyer financing history.");
+      }
+      setRepaymentAmount("");
+      setRepaymentNote("");
+      setGeneratingReceipt(true);
+      router.push(`/finance/financing/receipt/${encodeURIComponent(body.paymentId)}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to record the buyer repayment");
+    } finally {
+      setBusy(false);
+      setPaymentProcessing(false);
+    }
+  }
+
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  const repaymentAccount = accounts.find((account) => account.id === repaymentAccountId);
+  const repayableAccounts = accounts.filter((account) => Number(account.balance) > 0);
 
   return <>
   <div className="space-y-4">
     <div className="flex items-start justify-between gap-3">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-[#17212f]">Customer Gold Financing</h1>
-        <p className="mt-1 max-w-3xl text-sm text-[#637083]">Record cash given to a buyer before they bring gold. When you receive their gold, apply the buyer&apos;s financing account in Receive Stock to settle it at the calculated purchase value.</p>
+        <p className="mt-1 max-w-3xl text-sm text-[#637083]">Record cash given to a buyer before they bring gold. Apply received gold in Receive Stock, and record any cash or Mobile Money repayments here.</p>
       </div>
       <Button variant="outline" size="sm" onClick={() => { void load(); }} disabled={loading}><RefreshCw size={14} /> Refresh</Button>
     </div>
@@ -207,6 +265,28 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
       </CardContent>
     </Card>}
 
+    {canWrite && repayableAccounts.length > 0 && <Card>
+      <CardHeader><CardTitle>Record customer repayment</CardTitle><p className="text-xs text-[#637083]">Choose the buyer, then record cash or Mobile Money received against their outstanding financing.</p></CardHeader>
+      <CardContent>
+        <form onSubmit={(event) => { void submitRepayment(event); }} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <FormField label="Customer financing account" htmlFor="buyer-finance-repayment-customer">
+            <select id="buyer-finance-repayment-customer" required value={repaymentAccountId} onChange={(event) => {
+              setRepaymentAccountId(event.target.value);
+              setRepaymentAmount("");
+            }} className={fieldControlClass}>
+              {repayableAccounts.map((account) => <option key={account.id} value={account.id}>{account.customer.name} · {account.reference} · Owes {formatCurrency(account.balance)}</option>)}
+            </select>
+          </FormField>
+          <FormField label="Amount received (GHS)" htmlFor="buyer-finance-repayment-amount"><GhanaAmountInput id="buyer-finance-repayment-amount" required min="0.01" max={repaymentAccount ? Number(repaymentAccount.balance).toFixed(2) : undefined} step="0.01" value={repaymentAmount} onChange={setRepaymentAmount} className={fieldControlClass} /></FormField>
+          <FormField label="Received into account" htmlFor="buyer-finance-repayment-account"><select id="buyer-finance-repayment-account" required value={repaymentCashAccountId} onChange={(event) => setRepaymentCashAccountId(event.target.value)} className={fieldControlClass}><option value="">Select an account</option>{cashAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></FormField>
+          <FormField label="Payment method" htmlFor="buyer-finance-repayment-method"><select id="buyer-finance-repayment-method" value={repaymentMethod} onChange={(event) => setRepaymentMethod(event.target.value as (typeof methods)[number])} className={fieldControlClass}>{methods.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></FormField>
+          <FormField label="Date received" htmlFor="buyer-finance-repayment-date"><CalendarPicker id="buyer-finance-repayment-date" includeTime max={localDateTime()} value={repaymentPaidAt} onChange={setRepaymentPaidAt} /></FormField>
+          <FormField label="Reference or note" htmlFor="buyer-finance-repayment-note"><input id="buyer-finance-repayment-note" value={repaymentNote} onChange={(event) => setRepaymentNote(event.target.value)} maxLength={500} className={fieldControlClass} /></FormField>
+          <div className="flex items-end"><Button type="submit" variant="gold" disabled={busy || loading || !repaymentAmount || !repaymentCashAccountId || !repaymentAccount || Number(repaymentAmount) > Number(repaymentAccount.balance)}><Coins size={15} />{busy ? "Saving…" : "Record repayment"}</Button></div>
+        </form>
+      </CardContent>
+    </Card>}
+
     <Card>
       <CardHeader><CardTitle>Buyer financing accounts</CardTitle></CardHeader>
       <CardContent>
@@ -218,7 +298,15 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
               <tbody>{accounts.map((account) => {
                 const balance = balanceLabel(account.balance);
                 const activity = [
-                  ...account.payments.map((payment) => ({ id: payment.reference, date: payment.paidAt, label: "Cash advanced", reference: payment.reference, amount: payment.amount, href: `/finance/financing/receipt/${encodeURIComponent(payment.id)}`, icon: <ArrowUpRight size={13} /> })),
+                  ...account.payments.map((payment) => ({
+                    id: payment.reference,
+                    date: payment.paidAt,
+                    label: payment.direction === "OUTBOUND" ? "Cash advanced" : "Repayment received",
+                    reference: payment.reference,
+                    amount: payment.amount,
+                    href: `/finance/financing/receipt/${encodeURIComponent(payment.id)}`,
+                    icon: payment.direction === "OUTBOUND" ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />,
+                  })),
                   ...account.settlements.map((settlement) => ({ id: settlement.reference, date: settlement.createdAt, label: `Gold purchase ${settlement.trade.reference}`, reference: settlement.reference, amount: settlement.amount, href: `/receive-stock/receipt/${encodeURIComponent(settlement.trade.id)}`, icon: <ArrowDownLeft size={13} /> })),
                 ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
                 return <tr key={account.id} className="border-b align-top last:border-0">

@@ -43,10 +43,10 @@ async function lockedAccount(tx: TransactionClient, accountId: string) {
   return account;
 }
 
-export async function recordBuyerFinanceAdvance(userId: string, input: BuyerFinanceInput) {
+export async function recordBuyerFinanceTransaction(userId: string, input: BuyerFinanceInput) {
   return prisma.$transaction(async (tx) => {
     const paidAt = new Date(input.paidAt);
-    if (paidAt > new Date()) throw new HttpError("Advance payment date cannot be in the future", 400);
+    if (paidAt > new Date()) throw new HttpError("Payment date cannot be in the future", 400);
 
     const account = input.action === "CREATE_ADVANCE"
       ? await (async () => {
@@ -66,11 +66,20 @@ export async function recordBuyerFinanceAdvance(userId: string, input: BuyerFina
       })()
       : await lockedAccount(tx, input.accountId);
 
-    const referencePrice = await currentReferencePrice(tx);
+    const isRepayment = input.action === "REPAY";
+    if (isRepayment) {
+      const balance = await getBuyerFinanceBalance(tx, account.id);
+      if (!balance.greaterThan(0)) throw new HttpError("This account has no outstanding amount to repay", 409);
+      if (new Prisma.Decimal(input.amount).greaterThan(balance)) {
+        throw new HttpError("Repayment cannot exceed the amount the customer owes", 409);
+      }
+    }
+
+    const referencePrice = isRepayment ? null : await currentReferencePrice(tx);
     const payment = await tx.payment.create({
       data: {
         reference: reference("PAY"),
-        direction: "OUTBOUND",
+        direction: isRepayment ? "INBOUND" : "OUTBOUND",
         amount: new Prisma.Decimal(input.amount),
         referencePricePerGram: referencePrice?.priceAmount ?? null,
         referencePriceSource: referencePrice?.source ?? null,
@@ -90,12 +99,16 @@ export async function recordBuyerFinanceAdvance(userId: string, input: BuyerFina
       direction: payment.direction,
       amount: payment.amount,
       movementDate: payment.paidAt,
-      description: `Buyer gold financing advance ${account.reference}`,
+      description: isRepayment
+        ? `Buyer gold financing repayment ${account.reference}`
+        : `Buyer gold financing advance ${account.reference}`,
       createdById: userId,
     });
     await addAudit(tx, {
       userId,
-      action: input.action === "CREATE_ADVANCE" ? "buyer.finance.created" : "buyer.finance.advanced",
+      action: input.action === "CREATE_ADVANCE"
+        ? "buyer.finance.created"
+        : isRepayment ? "buyer.finance.repaid" : "buyer.finance.advanced",
       entity: "BuyerFinanceAccount",
       entityId: account.id,
       details: {
@@ -103,6 +116,7 @@ export async function recordBuyerFinanceAdvance(userId: string, input: BuyerFina
         customerId: account.customerId,
         paymentReference: payment.reference,
         amount: payment.amount.toString(),
+        ...(isRepayment ? { remainingBalance: (await getBuyerFinanceBalance(tx, account.id)).toFixed(2) } : {}),
       },
     });
     return { accountId: account.id, paymentId: payment.id };

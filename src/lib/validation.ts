@@ -222,6 +222,15 @@ export const buyerFinanceSchema = z.discriminatedUnion("action", [
     paidAt: pastOrPresentDateTime("Advance payment date"),
     note: optionalText,
   }).strict(),
+  z.object({
+    action: z.literal("REPAY"),
+    accountId: z.string().trim().min(1).max(191),
+    amount: advanceMoney,
+    cashAccountId: z.string().trim().min(1).max(191),
+    method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]),
+    paidAt: pastOrPresentDateTime("Repayment date"),
+    note: optionalText,
+  }).strict(),
 ]);
 export type BuyerFinanceInput = z.infer<typeof buyerFinanceSchema>;
 

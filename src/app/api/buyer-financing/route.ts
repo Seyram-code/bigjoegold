@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/authz";
 import { apiError, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { buyerFinanceSchema } from "@/lib/validation";
-import { calculateBuyerFinanceBalance, recordBuyerFinanceAdvance } from "@/lib/buyer-financing";
+import { calculateBuyerFinanceBalance, recordBuyerFinanceTransaction } from "@/lib/buyer-financing";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerTransactionEmail } from "@/lib/email";
 import { sendOwnerPaymentSms } from "@/lib/sms";
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     const user = await requireUser("payments:write");
     await enforceUserRateLimit(user.id, "buyer-finance-write", { limit: 20 });
     const input = buyerFinanceSchema.parse(await readJson(request));
-    const result = await recordBuyerFinanceAdvance(user.id, input);
+    const result = await recordBuyerFinanceTransaction(user.id, input);
     after(async () => {
       await sendOwnerPaymentSms(result.paymentId, user.name);
       try {
