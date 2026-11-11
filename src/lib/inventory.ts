@@ -19,6 +19,8 @@ const movementSigns: Record<StockMovementType, number> = {
   TRANSFER_OUT: -1,
   STOCK_CORRECTION_IN: 1,
   STOCK_CORRECTION_OUT: -1,
+  MEASUREMENT_CORRECTION_IN: 1,
+  MEASUREMENT_CORRECTION_OUT: -1,
 };
 
 export function movementBalance(movements: { type: StockMovementType; quantityGrams: Prisma.Decimal | string | number }[]) {

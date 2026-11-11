@@ -17,11 +17,7 @@ function calculateGoldMeasurementsFromDecimals(topGrams: Prisma.Decimal, downGra
   const karat = baseKarat
     .mul(rules.karatDiscountMultiplier)
     .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN);
-  if (karat.greaterThan(MAX_PURCHASE_KARAT)) {
-    throw new RangeError("Calculated karat exceeds 24. Verify the top and down weights; pure gold is 24 karat.");
-  }
   const purity = karat.div(24).mul(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-
   if (![pounds, exactDensity, density, karat, purity].every((value) => value.isFinite())) {
     throw new RangeError("Purchase measurements must produce finite values");
   }
@@ -30,6 +26,9 @@ function calculateGoldMeasurementsFromDecimals(topGrams: Prisma.Decimal, downGra
   }
   if (exactDensity.greaterThan("9999999999999999.99999999")) {
     throw new RangeError("The calculated density exceeds the supported storage range");
+  }
+  if (karat.greaterThan(MAX_PURCHASE_KARAT)) {
+    throw new RangeError("Calculated karat exceeds 24. Verify the top and down weights; pure gold is 24 karat.");
   }
   return { topGrams, downGrams, pounds, density, karat, purity };
 }

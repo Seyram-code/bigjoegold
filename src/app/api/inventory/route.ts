@@ -1,24 +1,32 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/authz";
+import { requireUser, userCan } from "@/lib/authz";
 import { apiError } from "@/lib/http";
 import { ledgerBalances } from "@/lib/inventory";
 import { calculateAvailableInventoryMeasurementTotals } from "@/lib/dashboard-metrics";
+import { purchaseFormulaRules } from "@/lib/purchase-formula";
 
 export async function GET() {
   try {
-    await requireUser("inventory:read");
-    const [lots, movements, locations, boardPrice] = await Promise.all([
+    const user = await requireUser("inventory:read");
+    const [lots, movements, locations, boardPrice, formulaConfig, activeReconciliation, receivingPrices] = await Promise.all([
       prisma.inventoryLot.findMany({
         orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }],
         include: {
           trade: {
             select: {
               reference: true,
+              type: true,
+              status: true,
+              priceUnit: true,
+              pricePerGram: true,
+              boardPriceId: true,
               purityBps: true,
               createdAt: true,
               customer: { select: { name: true } },
-              purchaseMeasurement: { select: { topKg: true, downKg: true, pounds: true, density: true, karat: true } },
+              purchaseMeasurement: { select: { topKg: true, downKg: true, pounds: true, density: true, karat: true, calculationSource: true, formulaVersion: true } },
+              boardPrice: { select: { id: true, priceAmount: true, currency: true, priceUnit: true, effectiveAt: true, source: true } },
+              buyerFinanceSettlement: { select: { id: true } },
             },
           },
           storageLocation: { select: { id: true, name: true } },
@@ -28,10 +36,28 @@ export async function GET() {
         by: ["inventoryLotId", "type"],
         where: { inventoryLotId: { not: null } },
         _sum: { quantityGrams: true },
+        _count: { _all: true },
       }),
       prisma.storageLocation.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
       prisma.goldBoardPrice.findFirst({ where: { priceType: "SELLING", effectiveAt: { lte: new Date() } }, orderBy: [{ effectiveAt: "desc" }, { createdAt: "desc" }, { id: "desc" }] }),
+      prisma.purchaseFormulaConfig.findUnique({ where: { id: "default" } }),
+      prisma.inventoryReconciliation.findFirst({
+        where: { status: "IN_PROGRESS" },
+        select: { lines: { select: { inventoryLotId: true } } },
+      }),
+      prisma.goldBoardPrice.findMany({
+        where: { priceType: "RECEIVING", currency: "GHS", effectiveAt: { lte: new Date() } },
+        orderBy: [{ effectiveAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        select: { id: true, priceAmount: true, currency: true, priceUnit: true, effectiveAt: true, source: true },
+      }),
     ]);
+    const formulaRules = purchaseFormulaRules(formulaConfig);
+    const movementGroupsByLot = new Map<string, typeof movements>();
+    for (const movement of movements) {
+      if (!movement.inventoryLotId) continue;
+      movementGroupsByLot.set(movement.inventoryLotId, [...(movementGroupsByLot.get(movement.inventoryLotId) ?? []), movement]);
+    }
+    const lotsInActiveStocktake = new Set(activeReconciliation?.lines.map((line) => line.inventoryLotId) ?? []);
     const ledger = ledgerBalances(movements.map((movement) => ({
       inventoryLotId: movement.inventoryLotId,
       type: movement.type,
@@ -45,6 +71,23 @@ export async function GET() {
         remainingGrams: ledgerBalance.toString(),
         ledgerBalanceGrams: ledgerBalance.toString(),
         cacheMismatch: !ledgerBalance.equals(lot.remainingGrams),
+        measurementEditable: lot.status === "ACTIVE"
+          && ledgerBalance.equals(lot.remainingGrams)
+          && ledgerBalance.equals(lot.originalGrams)
+          && lot.trade?.type === "PURCHASE"
+          && lot.trade.status === "POSTED"
+          && lot.trade.purchaseMeasurement?.calculationSource === "CALCULATED"
+          && lot.trade.purchaseMeasurement.formulaVersion === formulaRules.version
+          && lot.trade.priceUnit === formulaRules.priceUnit
+          && formulaRules.ownerConfirmed
+          && (!lot.trade.buyerFinanceSettlement || userCan(user, "payments:write"))
+          && !lotsInActiveStocktake.has(lot.id)
+          && (() => {
+            const groups = movementGroupsByLot.get(lot.id) ?? [];
+            const allowedTypes = new Set(["PURCHASE_RECEIPT", "MEASUREMENT_CORRECTION_IN", "MEASUREMENT_CORRECTION_OUT"]);
+            return groups.some((group) => group.type === "PURCHASE_RECEIPT" && group._count._all === 1)
+              && groups.every((group) => allowedTypes.has(group.type));
+          })(),
       };
     });
     const availableLots = ledgerLots.filter((lot) => lot.status === "ACTIVE" && new Prisma.Decimal(lot.ledgerBalanceGrams).greaterThan(0));
@@ -82,6 +125,8 @@ export async function GET() {
       },
       lots: ledgerLots,
       locations,
+      purchaseFormula: formulaRules,
+      receivingPrices: receivingPrices.filter((price) => price.priceUnit === formulaRules.priceUnit),
     });
   } catch (error) {
     return apiError(error);

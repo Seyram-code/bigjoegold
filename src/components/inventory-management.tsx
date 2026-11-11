@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Pencil, X } from "lucide-react";
+import { calculatePurchaseMeasurements } from "@/lib/gold";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshButton } from "@/components/ui/refresh-button";
@@ -11,11 +13,21 @@ import { CalendarPicker } from "@/components/ui/calendar-picker";
 import { StockAutocomplete, type StockOption } from "@/components/ui/stock-autocomplete";
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
-import { formatCurrency, formatWeight } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyExact, formatWeight } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { useToast } from "@/components/ui/toast-provider";
 import { stocktakeVariance } from "@/lib/stocktake";
+import type { PurchaseFormulaRules } from "@/lib/purchase-formula";
+
+type ReceivingPrice = {
+  id: string;
+  priceAmount: string | number;
+  currency: string;
+  priceUnit: string;
+  effectiveAt: string;
+  source: string;
+};
 
 type Lot = {
   id: string;
@@ -35,14 +47,22 @@ type Lot = {
   storageLocation: { id: string; name: string } | null;
   trade: {
     reference: string;
+    type: string;
+    status: string;
+    priceUnit: string;
+    boardPriceId: string | null;
     purchaseMeasurement: {
       topKg: string | number;
       downKg: string | number;
       pounds: string | number;
       density: string | number;
       karat: string | number;
+      calculationSource: string;
     } | null;
+    boardPrice: ReceivingPrice | null;
+    buyerFinanceSettlement: { id: string } | null;
   } | null;
+  measurementEditable: boolean;
 };
 
 type Movement = {
@@ -113,6 +133,8 @@ function movementLabel(type: string) {
     TRANSFER_OUT: "Transfer out",
     STOCK_CORRECTION_IN: "Correction in",
     STOCK_CORRECTION_OUT: "Correction out",
+    MEASUREMENT_CORRECTION_IN: "Measurement correction in",
+    MEASUREMENT_CORRECTION_OUT: "Measurement correction out",
   } as Record<string, string>)[type] ?? type;
 }
 
@@ -122,14 +144,18 @@ export function InventoryManagement({
   canAdjust,
   canTransfer,
   canReconcile,
+  canEditMeasurements,
 }: {
   view: InventoryView;
   canOpen: boolean;
   canAdjust: boolean;
   canTransfer: boolean;
   canReconcile: boolean;
+  canEditMeasurements: boolean;
 }) {
   const [lots, setLots] = useState<Lot[]>([]);
+  const [receivingPrices, setReceivingPrices] = useState<ReceivingPrice[]>([]);
+  const [purchaseFormula, setPurchaseFormula] = useState<PurchaseFormulaRules | null>(null);
   const [locations, setLocations] = useState<{ id: string; name: string }[]>([]);
   const [summary, setSummary] = useState<Record<string, number | null>>({});
   const [movements, setMovements] = useState<Movement[]>([]);
@@ -144,6 +170,8 @@ export function InventoryManagement({
   const [stocktakeHistory, setStocktakeHistory] = useState<StocktakeHistory[]>([]);
   const [confirmStocktake, setConfirmStocktake] = useState(false);
   const [confirmCancelStocktake, setConfirmCancelStocktake] = useState(false);
+  const [editingLot, setEditingLot] = useState<Lot | null>(null);
+  const [measurementForm, setMeasurementForm] = useState({ topGrams: "", downGrams: "", boardPriceId: "", reason: "" });
   const stocktakeDirty = useRef(false);
   const [form, setForm] = useState<FormValues>({
     batchNumber: "",
@@ -185,8 +213,16 @@ export function InventoryManagement({
       ]);
       if (!inventoryResponse.ok) throw new Error(messageFrom(inventoryBody, "Unable to load inventory"));
       if (inventoryBody && typeof inventoryBody === "object") {
-        const data = inventoryBody as { lots?: Lot[]; locations?: { id: string; name: string }[]; summary?: Record<string, number | null> };
+        const data = inventoryBody as {
+          lots?: Lot[];
+          locations?: { id: string; name: string }[];
+          summary?: Record<string, number | null>;
+          receivingPrices?: ReceivingPrice[];
+          purchaseFormula?: PurchaseFormulaRules;
+        };
         setLots(Array.isArray(data.lots) ? data.lots : []);
+        setReceivingPrices(Array.isArray(data.receivingPrices) ? data.receivingPrices : []);
+        setPurchaseFormula(data.purchaseFormula ?? null);
         setLocations(Array.isArray(data.locations) ? data.locations : []);
         setSummary(data.summary ?? {});
         setForm((current) => ({
@@ -254,6 +290,41 @@ export function InventoryManagement({
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to post the stock movement");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startMeasurementEdit(lot: Lot) {
+    const measurement = lot.trade?.purchaseMeasurement;
+    if (!measurement) return;
+    setEditingLot(lot);
+    setMeasurementForm({
+      topGrams: String(Number(measurement.topKg) * 1000),
+      downGrams: String(Number(measurement.downKg) * 1000),
+      boardPriceId: lot.trade?.boardPriceId ?? lot.trade?.boardPrice?.id ?? "",
+      reason: "",
+    });
+  }
+
+  async function saveMeasurementEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingLot) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/inventory/lots/${encodeURIComponent(editingLot.id)}/measurement`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(measurementForm),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to correct the purchase measurements"));
+      showToast("Purchase measurements, purchase value, and stock balance were corrected.");
+      setEditingLot(null);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to correct the purchase measurements");
     } finally {
       setBusy(false);
     }
@@ -388,6 +459,27 @@ export function InventoryManagement({
     sum + Number(stocktakeVariance(line.expectedGrams, String(line.countedGrams), line.costPerGram).costImpact), 0);
   const allStocktakeCountsEntered = Boolean(stocktake && countedStocktakeLines.length === stocktake.lines.length);
   const allStocktakeVariancesExplained = stocktakeVarianceLines.every((line) => Boolean(line.reason?.trim()));
+
+  const measurementPrices = editingLot?.trade?.boardPrice
+    && !receivingPrices.some((price) => price.id === editingLot.trade?.boardPrice?.id)
+    ? [...receivingPrices, editingLot.trade.boardPrice]
+    : receivingPrices;
+  const selectedMeasurementPrice = measurementPrices.find((price) => price.id === measurementForm.boardPriceId);
+  let measurementPreview: ReturnType<typeof calculatePurchaseMeasurements> | null = null;
+  let measurementPreviewError = "";
+  if (editingLot && purchaseFormula && selectedMeasurementPrice) {
+    try {
+      measurementPreview = calculatePurchaseMeasurements(
+        measurementForm.topGrams,
+        measurementForm.downGrams,
+        String(selectedMeasurementPrice.priceAmount),
+        purchaseFormula,
+      );
+    } catch (cause) {
+      if (!(cause instanceof RangeError)) throw cause;
+      measurementPreviewError = cause.message;
+    }
+  }
 
   return <div className="space-y-6">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -547,7 +639,12 @@ export function InventoryManagement({
       </CardContent>
     </Card>}
 
-    {["current", "batches", "alerts"].includes(view) && <LotsTable lots={view === "alerts" ? alertLots : lots} showAlerts={view === "alerts"} />}
+    {["current", "batches", "alerts"].includes(view) && <LotsTable
+      lots={view === "alerts" ? alertLots : lots}
+      showAlerts={view === "alerts"}
+      canEditMeasurements={canEditMeasurements && view !== "alerts"}
+      onEditMeasurement={startMeasurementEdit}
+    />}
     {view === "movements" && <Card><CardHeader><CardTitle>Immutable stock ledger</CardTitle><p className="mt-1 text-xs text-[#75808d]">{loading ? "Loading ledger…" : `Page ${page} of ${pageCount}`}</p></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[1100px] border-collapse text-left text-xs"><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Movement</th><th className="px-4 py-3">Reference / batch</th><th className="px-4 py-3">Trade</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Location / transfer</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Recorded by</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3"><Badge tone={movement.type.includes("OUT") || movement.type === "SALE_ISSUE" ? "red" : "green"}>{movementLabel(movement.type)}</Badge></td><td className="px-4 py-3 font-medium text-[#344151]">{movement.reference}<span className="block text-[10px] text-[#87919d]">{movement.inventoryLot?.batchNumber || "—"}</span></td><td className="px-4 py-3">{movement.trade?.reference ?? "—"}</td><td className="px-4 py-3">{formatWeight(movement.quantityGrams, "g", 2)}</td><td className="px-4 py-3">{movement.transferReference ? `${movement.fromLocation?.name ?? "—"} → ${movement.toLocation?.name ?? "—"}` : movement.location?.name ?? "—"}</td><td className="max-w-[250px] px-4 py-3">{movement.reason ?? "—"}</td><td className="px-4 py-3">{new Date(movement.movementDate).toLocaleString("en-GH", { dateStyle: "medium", timeStyle: "short" })}</td><td className="px-4 py-3">{movement.createdBy.name}</td></tr>)}</tbody></table>{!loading && movements.length === 0 && <p className="p-8 text-center text-xs text-[#89929d]">No stock movements have been recorded.</p>}<div className="flex items-center justify-between border-t border-[#edf0f3] px-4 py-3"><Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((current) => current - 1)}>Previous</Button><span className="text-xs text-[#75808d]">Page {page} / {pageCount}</span><Button variant="outline" size="sm" disabled={page >= pageCount || loading} onClick={() => setPage((current) => current + 1)}>Next</Button></div></CardContent></Card>}
     <ConfirmDialog
       open={Boolean(pendingMovement)}
@@ -579,6 +676,58 @@ export function InventoryManagement({
       onCancel={() => setConfirmCancelStocktake(false)}
       onConfirm={() => { void cancelStocktake(); }}
     />
+    {editingLot && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#0c1521]/50 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setEditingLot(null); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="inventory-measurement-title" className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-[#e8ebef] bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,.24)] sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="inventory-measurement-title" className="text-base font-semibold text-[#17212f]">Correct received gold measurements</h2>
+            <p className="mt-1 text-xs text-[#75808d]">{editingLot.batchNumber || editingLot.trade?.reference} · {editingLot.source}</p>
+          </div>
+          <button type="button" aria-label="Close measurement editor" onClick={() => setEditingLot(null)} disabled={busy} className="rounded-lg p-2 text-[#75808d] hover:bg-[#f3f5f7] disabled:opacity-50"><X size={17} /></button>
+        </div>
+        <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">Change the top/down weights or select a different published receiving price. The preview recalculates pounds, density, karat, purity, and the purchase amount. Saving also updates cost per gram and stock balance. Existing cash payments remain unchanged; batches with sales or other stock activity must be reconciled separately.</p>
+        <form onSubmit={(event) => { void saveMeasurementEdit(event); }} className="mt-4 grid gap-4 sm:grid-cols-2">
+          <FormField label="Top weight (grams)" htmlFor="inventory-edit-top-weight">
+            <input id="inventory-edit-top-weight" type="number" required min="0.00001" step="0.00001" value={measurementForm.topGrams} onChange={(event) => setMeasurementForm((current) => ({ ...current, topGrams: event.target.value }))} className={fieldControlClass} />
+          </FormField>
+          <FormField label="Down weight (grams)" htmlFor="inventory-edit-down-weight">
+            <input id="inventory-edit-down-weight" type="number" required min="0.00001" step="0.00001" value={measurementForm.downGrams} onChange={(event) => setMeasurementForm((current) => ({ ...current, downGrams: event.target.value }))} className={fieldControlClass} />
+          </FormField>
+          <FormField label="Receiving price (GHS per pure gram)" htmlFor="inventory-edit-price" className="sm:col-span-2">
+            <select id="inventory-edit-price" required value={measurementForm.boardPriceId} onChange={(event) => setMeasurementForm((current) => ({ ...current, boardPriceId: event.target.value }))} className={fieldControlClass}>
+              <option value="">Select a published receiving price</option>
+              {measurementPrices.map((price) => <option key={price.id} value={price.id}>
+                {formatCurrencyExact(String(price.priceAmount))} / g · {price.source} · {new Date(price.effectiveAt).toLocaleString("en-GH", { dateStyle: "medium", timeStyle: "short" })}
+              </option>)}
+            </select>
+          </FormField>
+          <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#f7f8fa] p-3 sm:col-span-2 sm:grid-cols-3">
+            <MeasurementValue label="Pounds" value={measurementPreview ? `${formatDecimalTruncated(measurementPreview.pounds.toString(), 2)} lb` : "—"} />
+            <MeasurementValue label="Density" value={measurementPreview ? formatDecimalTruncated(measurementPreview.density.toString(), 2) : "—"} />
+            <MeasurementValue label="Karat" value={measurementPreview ? formatDecimalTruncated(measurementPreview.karat.toString(), 2) : "—"} />
+            <MeasurementValue label="Purity" value={measurementPreview ? `${formatDecimalTruncated(measurementPreview.purity.toString(), 2)}%` : "—"} />
+            <MeasurementValue label="Price per gram" value={selectedMeasurementPrice ? `${formatCurrencyExact(String(selectedMeasurementPrice.priceAmount))} / g` : "—"} />
+            <MeasurementValue label="New purchase amount" value={measurementPreview ? formatCurrencyExact(measurementPreview.amount.toString()) : "—"} emphasized />
+          </div>
+          {measurementPreviewError && <p role="status" className="text-xs text-red-700 sm:col-span-2">{measurementPreviewError}</p>}
+          {!purchaseFormula && <p role="status" className="text-xs text-red-700 sm:col-span-2">Purchase formula details are unavailable. Reload the page before making a correction.</p>}
+          <FormField label="Reason for correction (required)" htmlFor="inventory-edit-reason" className="sm:col-span-2">
+            <input id="inventory-edit-reason" required minLength={5} maxLength={500} value={measurementForm.reason} onChange={(event) => setMeasurementForm((current) => ({ ...current, reason: event.target.value }))} className={fieldControlClass} />
+          </FormField>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            <Button type="button" variant="outline" onClick={() => setEditingLot(null)} disabled={busy}>Cancel</Button>
+            <Button type="submit" variant="gold" disabled={busy || !measurementPreview}>{busy ? "Saving…" : "Save corrected measurements"}</Button>
+          </div>
+        </form>
+      </section>
+    </div>}
+  </div>;
+}
+
+function MeasurementValue({ label, value, emphasized = false }: { label: string; value: string; emphasized?: boolean }) {
+  return <div>
+    <p className="text-[10px] font-medium uppercase tracking-wide text-[#89929d]">{label}</p>
+    <p className={`mt-1 text-sm tabular-nums ${emphasized ? "font-semibold text-[#795719]" : "font-medium text-[#344151]"}`}>{value}</p>
   </div>;
 }
 
@@ -607,14 +756,14 @@ function ReasonField({ id, value, onChange }: { id: string; value: string; onCha
   return <FormField label="Reason (required for audit)" htmlFor={id}><input id={id} required minLength={5} maxLength={500} value={value} onChange={(event) => onChange(event.target.value)} className={fieldControlClass} /></FormField>;
 }
 
-function LotsTable({ lots, showAlerts }: { lots: Lot[]; showAlerts: boolean }) {
-  return <Card><CardHeader><CardTitle>{showAlerts ? "Batches needing attention" : "Stock by batch"}</CardTitle><p className="mt-1 text-xs text-[#75808d]">Remaining quantity is derived from the batch’s recorded stock movements.</p></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[1500px] border-collapse text-left text-xs"><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Batch / source</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Weight (g)</th><th className="px-4 py-3">Top (g)</th><th className="px-4 py-3">Down (g)</th><th className="px-4 py-3">Pounds</th><th className="px-4 py-3">Density</th><th className="px-4 py-3">Karat</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Cost / g</th><th className="px-4 py-3">Remaining (g)</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{lots.map((lot) => {
+function LotsTable({ lots, showAlerts, canEditMeasurements, onEditMeasurement }: { lots: Lot[]; showAlerts: boolean; canEditMeasurements: boolean; onEditMeasurement: (lot: Lot) => void }) {
+  return <Card><CardHeader><CardTitle>{showAlerts ? "Batches needing attention" : "Stock by batch"}</CardTitle><p className="mt-1 text-xs text-[#75808d]">Remaining quantity is derived from the batch’s recorded stock movements.</p></CardHeader><CardContent className="overflow-x-auto p-0"><table className={`w-full ${canEditMeasurements ? "min-w-[1600px]" : "min-w-[1500px]"} border-collapse text-left text-xs`}><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Batch / source</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Weight (g)</th><th className="px-4 py-3">Top (g)</th><th className="px-4 py-3">Down (g)</th><th className="px-4 py-3">Pounds</th><th className="px-4 py-3">Density</th><th className="px-4 py-3">Karat</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Cost / g</th><th className="px-4 py-3">Remaining (g)</th><th className="px-4 py-3">Status</th>{canEditMeasurements && <th className="px-4 py-3">Actions</th>}</tr></thead><tbody>{lots.map((lot) => {
     const measurement = lot.trade?.purchaseMeasurement;
     const topGrams = measurement ? Number(measurement.topKg) * 1000 : null;
     const downGrams = measurement ? Number(measurement.downKg) * 1000 : null;
     const pounds = measurement?.pounds ?? lot.pounds;
     const density = measurement?.density ?? lot.density;
     const karat = measurement?.karat ?? lot.purityBps / 10000 * 24;
-    return <tr key={lot.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3 font-medium text-[#344151]">{lot.batchNumber || lot.trade?.reference || "—"}<span className="block text-[10px] text-[#87919d]">{lot.source || lot.trade?.reference || "Unknown source"}</span></td><td className="px-4 py-3">{new Date(lot.receivedAt).toLocaleDateString("en-GH")}</td><td className="px-4 py-3">{formatWeight(lot.originalGrams, "g", 2)}</td><td className="px-4 py-3">{topGrams === null ? "—" : formatDecimalTruncated(topGrams, 2)}</td><td className="px-4 py-3">{downGrams === null ? "—" : formatDecimalTruncated(downGrams, 2)}</td><td className="px-4 py-3">{pounds === null ? "—" : formatDecimalTruncated(pounds, 2)}</td><td className="px-4 py-3">{density === null ? "—" : formatDecimalTruncated(density, 2)}</td><td className="px-4 py-3">{formatDecimalTruncated(karat, 2)}</td><td className="px-4 py-3">{lot.storageLocation?.name ?? "—"}</td><td className="px-4 py-3">{formatCurrency(Number(lot.costPerGram))}</td><td className="px-4 py-3 font-semibold text-[#344151]">{formatWeight(lot.ledgerBalanceGrams, "g", 2)}</td><td className="px-4 py-3"><Badge tone={lot.cacheMismatch || Number(lot.ledgerBalanceGrams) < 0 ? "red" : lot.status === "DEPLETED" ? "gold" : "green"}>{lot.cacheMismatch ? "Ledger mismatch" : Number(lot.ledgerBalanceGrams) < 0 ? "Negative ledger" : lot.status}</Badge></td></tr>;
+    return <tr key={lot.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3 font-medium text-[#344151]">{lot.batchNumber || lot.trade?.reference || "—"}<span className="block text-[10px] text-[#87919d]">{lot.source || lot.trade?.reference || "Unknown source"}</span></td><td className="px-4 py-3">{new Date(lot.receivedAt).toLocaleDateString("en-GH")}</td><td className="px-4 py-3">{formatWeight(lot.originalGrams, "g", 2)}</td><td className="px-4 py-3">{topGrams === null ? "—" : formatDecimalTruncated(topGrams, 2)}</td><td className="px-4 py-3">{downGrams === null ? "—" : formatDecimalTruncated(downGrams, 2)}</td><td className="px-4 py-3">{pounds === null ? "—" : formatDecimalTruncated(pounds, 2)}</td><td className="px-4 py-3">{density === null ? "—" : formatDecimalTruncated(density, 2)}</td><td className="px-4 py-3">{formatDecimalTruncated(karat, 2)}</td><td className="px-4 py-3">{lot.storageLocation?.name ?? "—"}</td><td className="px-4 py-3">{formatCurrency(Number(lot.costPerGram))}</td><td className="px-4 py-3 font-semibold text-[#344151]">{formatWeight(lot.ledgerBalanceGrams, "g", 2)}</td><td className="px-4 py-3"><Badge tone={lot.cacheMismatch || Number(lot.ledgerBalanceGrams) < 0 ? "red" : lot.status === "DEPLETED" ? "gold" : "green"}>{lot.cacheMismatch ? "Ledger mismatch" : Number(lot.ledgerBalanceGrams) < 0 ? "Negative ledger" : lot.status}</Badge></td>{canEditMeasurements && <td className="px-4 py-3"><Button size="sm" variant="outline" disabled={!lot.measurementEditable} title={lot.measurementEditable ? "Edit the purchase measurements" : "Only untouched, eligible purchase batches can be edited."} onClick={() => onEditMeasurement(lot)}><Pencil size={13} /> Edit</Button>{!lot.measurementEditable && <span className="mt-1 block text-[10px] text-[#89929d]">Unavailable</span>}</td>}</tr>;
   })}</tbody></table>{lots.length === 0 && <p className="p-8 text-center text-xs text-[#89929d]">{showAlerts ? "No stock reconciliation alerts." : "No stock batches have been recorded."}</p>}</CardContent></Card>;
 }

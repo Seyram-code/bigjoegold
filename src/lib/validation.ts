@@ -299,6 +299,18 @@ export const inventoryMovementSchema = z.discriminatedUnion("action", [
 ]);
 export type InventoryMovementInput = z.infer<typeof inventoryMovementSchema>;
 
+const purchaseMeasurementGrams = z.string().trim()
+  .regex(/^\d{1,9}(?:\.\d{1,5})?$/, "Enter grams with up to 5 decimal places")
+  .refine((value) => Number.isFinite(Number(value)) && Number(value) > 0, "Weight must be greater than zero");
+
+export const purchaseMeasurementCorrectionSchema = z.object({
+  topGrams: purchaseMeasurementGrams,
+  downGrams: purchaseMeasurementGrams,
+  boardPriceId: z.string().trim().min(1).max(191),
+  reason: inventoryReason,
+}).strict();
+export type PurchaseMeasurementCorrectionInput = z.infer<typeof purchaseMeasurementCorrectionSchema>;
+
 const stocktakeCount = z.string().trim()
   .regex(/^\d{1,11}(?:\.\d{1,5})?$/, "Enter grams with up to 5 decimal places")
   .refine((value) => Number.isFinite(Number(value)) && Number(value) >= 0, "Counted stock cannot be negative");

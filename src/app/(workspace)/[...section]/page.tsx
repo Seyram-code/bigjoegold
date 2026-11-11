@@ -105,6 +105,7 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
     canAdjust={Boolean(user && can(user.role, "inventory:adjust", user.permissions))}
     canTransfer={Boolean(user && can(user.role, "inventory:transfer", user.permissions))}
     canReconcile={Boolean(user && can(user.role, "inventory:reconcile", user.permissions))}
+    canEditMeasurements={Boolean(user && can(user.role, "inventory:adjust", user.permissions) && can(user.role, "purchases:write", user.permissions))}
   />;
   if (path === "/receive-stock") {
     return <ReceiveStock
