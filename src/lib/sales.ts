@@ -67,8 +67,12 @@ export async function postSale(
         throw new HttpError("The sale customer must match the customer who requested this gold", 400);
       }
       const fulfilledGrams = advanceRequest.fulfillments.reduce((sum, item) => sum.plus(item.grams), new Prisma.Decimal(0));
-      if (fulfilledGrams.plus(grossGrams).greaterThan(advanceRequest.requestedGrams)) {
-        throw new HttpError("Fulfillment cannot exceed the customer’s remaining requested weight", 409);
+      const remainingRequestedGrams = new Prisma.Decimal(advanceRequest.requestedGrams).minus(fulfilledGrams);
+      if (grossGrams.greaterThan(remainingRequestedGrams)) {
+        throw new HttpError(
+          `This release is ${grossGrams.toDecimalPlaces(5).toFixed(5)} g, but only ${remainingRequestedGrams.toDecimalPlaces(5).toFixed(5)} g remain on this request. Refresh the request and reduce the batch weights.`,
+          409,
+        );
       }
       const balance = await getCustomerAdvanceBalance(tx, advanceRequest.advanceId);
       if (!balance.isFinite()) throw new HttpError("Unable to calculate the customer advance balance", 500);

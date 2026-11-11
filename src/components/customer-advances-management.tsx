@@ -671,7 +671,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
                 }}>Remove</button></div>;
               })}
               <p className="border-t pt-1 font-semibold">Total release: {formatWeight(allocatedFulfillmentGrams, "g", 2)}{selectedRequest ? ` · Remaining request: ${formatWeight(selectedRequest.remainingGrams, "g", 2)}` : ""}</p>
-              {selectedRequest && allocatedFulfillmentDecimal.greaterThan(selectedRequest.remainingGrams) && <p role="alert" className="rounded-md bg-amber-50 px-2 py-1 text-amber-900">Reduce the batch amounts to no more than the remaining requested weight.</p>}
+              {selectedRequest && allocatedFulfillmentDecimal.greaterThan(selectedRequest.remainingGrams) && <p role="alert" className="rounded-md bg-amber-50 px-2 py-1 text-amber-900">Selected release ({formatWeight(allocatedFulfillmentDecimal.toString(), "g", 2)}) exceeds the remaining request ({formatWeight(selectedRequest.remainingGrams, "g", 2)}). Reduce the batch weights before releasing.</p>}
             </div>}
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#e8ebef] p-3 sm:col-span-2">
               <Button type="button" variant={measurementConfirmed ? "outline" : "gold"} disabled={!boardPrice || !fulfillmentAllocations.length} onClick={() => {
@@ -691,7 +691,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
             <FormField label="Release date" htmlFor="fulfill-date"><CalendarPicker id="fulfill-date" includeTime max={localDateTime()} required value={transactionDate} onChange={setTransactionDate} /></FormField>
             <FormField label="Gold value at current rate (GHS)" htmlFor="fulfill-value"><input id="fulfill-value" readOnly value={fulfillmentQuote ? currency(fulfillmentQuote) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
             <FormField label="Fulfillment note" htmlFor="fulfill-note"><input id="fulfill-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
-            {canFulfill && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !selectedRequest || !fulfillmentAllocations.length || !boardPrice || !fulfillmentQuote}><WalletCards size={15} /> Release gold and deduct advance</Button></div>}
+            {canFulfill && <div className="sm:col-span-2"><Button variant="gold" disabled={busy || loading || !selectedRequest || !fulfillmentAllocations.length || allocatedFulfillmentDecimal.greaterThan(selectedRequest.remainingGrams) || !boardPrice || !fulfillmentQuote}><WalletCards size={15} /> Release gold and deduct advance</Button></div>}
           </form>
         </CardContent>
       </Card>
