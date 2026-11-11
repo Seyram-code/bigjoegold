@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     await requireUser("payments:read");
     const customerId = new URL(request.url).searchParams.get("customerId") || undefined;
     const [advances, currentBoardPrice] = await Promise.all([prisma.customerAdvance.findMany({
-      where: customerId ? { customerId } : undefined,
+      where: customerId ? { customerId, mergedIntoId: null } : { mergedIntoId: null },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: customerId ? undefined : 250,
       include: {

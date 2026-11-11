@@ -28,7 +28,34 @@ async function ensureAdvanceLocked(tx: TransactionClient, advanceId: string) {
   await tx.$queryRaw`SELECT id FROM CustomerAdvance WHERE id = ${advanceId} FOR UPDATE`;
   const advance = await tx.customerAdvance.findUnique({ where: { id: advanceId }, include: { customer: true } });
   if (!advance) throw new HttpError("Customer advance not found", 404);
+  if (advance.mergedIntoId) throw new HttpError("This advance was merged into the customer’s current account. Refresh and select the current account.", 409);
   return advance;
+}
+
+async function ensureCustomerAdvanceLocked(
+  tx: TransactionClient,
+  customerId: string,
+  kind: "BUYER" | "SUPPLIER",
+  userId: string,
+) {
+  await tx.$queryRaw`SELECT id FROM Customer WHERE id = ${customerId} FOR UPDATE`;
+  const customer = await tx.customer.findUnique({ where: { id: customerId } });
+  if (!customer || !customer.isActive || customer.kind !== kind) {
+    throw new HttpError(kind === "BUYER" ? "Select an active buyer" : "Select an active supplier", 400);
+  }
+  const existing = await tx.customerAdvance.findFirst({
+    where: { customerId, mergedIntoId: null },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  if (existing) return { advance: existing, created: false };
+  const advance = await tx.customerAdvance.create({
+    data: {
+      reference: reference("ADV"),
+      customerId,
+      createdById: userId,
+    },
+  });
+  return { advance, created: true };
 }
 
 async function createGoldRequest(
@@ -67,47 +94,38 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
     if (paidAt > new Date()) throw new HttpError("Advance payment date cannot be in the future", 400);
 
     if (input.action === "OPENING_BALANCE") {
-      const supplier = await tx.customer.findUnique({ where: { id: input.customerId } });
-      if (!supplier || !supplier.isActive || supplier.kind !== "SUPPLIER") {
-        throw new HttpError("Select an active supplier", 400);
-      }
+      const { advance, created } = await ensureCustomerAdvanceLocked(tx, input.customerId, "SUPPLIER", userId);
       const amount = new Prisma.Decimal(input.amount);
-      const advance = await tx.customerAdvance.create({
-        data: {
-          reference: reference("ADV"),
-          customerId: supplier.id,
-          openingBalance: amount.negated(),
-          note: input.note || null,
-          createdById: userId,
-        },
-      });
+      if (created) {
+        await tx.customerAdvance.update({
+          where: { id: advance.id },
+          data: { openingBalance: amount.negated(), note: input.note || null },
+        });
+      } else {
+        await tx.customerAdvance.update({
+          where: { id: advance.id },
+          data: { openingBalance: { decrement: amount } },
+        });
+      }
       await addAudit(tx, {
         userId,
-        action: "supplier.advance.opening_balance.created",
+        action: created ? "supplier.advance.opening_balance.created" : "supplier.advance.opening_balance.adjusted",
         entity: "CustomerAdvance",
         entityId: advance.id,
         details: {
           reference: advance.reference,
-          supplierId: supplier.id,
+          supplierId: input.customerId,
           amountOwedToBigJoe: amount.toFixed(2),
           note: input.note || null,
+          accumulatedOnExistingAccount: !created,
         },
       });
       return advance;
     }
 
     if (input.action === "CREATE_ADVANCE") {
-      const customer = await tx.customer.findUnique({ where: { id: input.customerId } });
-      if (!customer || !customer.isActive || customer.kind !== "BUYER") throw new HttpError("Select an active buyer", 400);
+      const { advance, created } = await ensureCustomerAdvanceLocked(tx, input.customerId, "BUYER", userId);
       const referencePrice = await currentReferencePrice(tx);
-      const advance = await tx.customerAdvance.create({
-        data: {
-          reference: reference("ADV"),
-          customerId: customer.id,
-          note: input.note || null,
-          createdById: userId,
-        },
-      });
       const payment = await tx.payment.create({
         data: {
           reference: reference("PAY"),
@@ -119,7 +137,7 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
           method: input.method,
           note: input.note || null,
           paidAt,
-          customerId: customer.id,
+          customerId: input.customerId,
           customerAdvanceId: advance.id,
           cashAccountId: input.cashAccountId,
           createdById: userId,
@@ -139,10 +157,10 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
       }
       await addAudit(tx, {
         userId,
-        action: "customer.advance.created",
+        action: created ? "customer.advance.created" : "customer.advance.funded",
         entity: "CustomerAdvance",
         entityId: advance.id,
-        details: { reference: advance.reference, customerId: customer.id, amount: payment.amount.toString() },
+        details: { reference: advance.reference, customerId: input.customerId, amount: payment.amount.toString(), reusedCustomerAccount: !created },
       });
       return { ...advance, paymentId: payment.id };
     }

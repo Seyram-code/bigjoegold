@@ -583,6 +583,9 @@ model CustomerAdvance {
   reference      String                   @unique
   customerId     String
   customer       Customer                 @relation(fields: [customerId], references: [id])
+  mergedIntoId   String?
+  mergedInto     CustomerAdvance?         @relation("CustomerAdvanceMerge", fields: [mergedIntoId], references: [id], onDelete: Restrict)
+  mergedFrom     CustomerAdvance[]        @relation("CustomerAdvanceMerge")
   openingBalance Decimal                  @default(0) @db.Decimal(16, 2)
   note           String?                  @db.Text
   createdAt      DateTime                 @default(now())
@@ -592,6 +595,7 @@ model CustomerAdvance {
   requests       CustomerAdvanceRequest[]
 
   @@index([customerId, createdAt])
+  @@index([mergedIntoId])
 }
 
 model CustomerAdvanceRequest {

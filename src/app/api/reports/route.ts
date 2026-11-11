@@ -258,6 +258,7 @@ export async function GET(request: Request) {
         : Promise.resolve(null),
       readPayments
         ? prisma.customerAdvance.findMany({
+          where: { mergedIntoId: null },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           select: {
             id: true,
