@@ -16,7 +16,7 @@ import { fieldControlClass, FormField } from "@/components/ui/form-field";
 import { formatCurrency } from "@/lib/formatters";
 import { fetchAllCustomers } from "@/lib/customer-client";
 
-type Customer = { id: string; name: string; code: string };
+type Customer = { id: string; name: string; code: string; kind: "BUYER" };
 type CashAccount = { id: string; name: string; currency: string; isActive: boolean };
 type Settlement = {
   id: string;

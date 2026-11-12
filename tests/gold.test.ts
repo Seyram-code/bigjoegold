@@ -306,7 +306,7 @@ test("readJson accepts same-origin requests and rejects cross-origin mutations",
     },
     body: JSON.stringify({ ok: true }),
   });
-  await assert.doesNotReject(() => readJson(sameOriginNoOriginHeader));
+  await assert.rejects(() => readJson(sameOriginNoOriginHeader), /Cross-origin or originless mutations are not allowed/);
 
   const crossOrigin = new Request("http://127.0.0.1:3001/api/settings/purchase-formula", {
     method: "PUT",

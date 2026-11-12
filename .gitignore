@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Local production database exports are sensitive and must never be committed.
+prisma/*-before-business-reset-*.sql
+
 # vercel
 .vercel
 

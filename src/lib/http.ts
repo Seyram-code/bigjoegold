@@ -36,7 +36,10 @@ export async function readJson(request: Request, maxBytes = 64 * 1024): Promise<
   const origin = request.headers.get("origin");
   const requestUrl = new URL(request.url);
   const expectedOrigin = new URL(process.env.BETTER_AUTH_URL ?? request.url).origin;
-  if (origin) {
+  if (!origin) {
+    throw new HttpError("Cross-origin or originless mutations are not allowed", 403);
+  }
+  {
     const originUrl = new URL(origin);
     const sameLocalhost = ["127.0.0.1", "localhost", "[::1]"]
       .includes(originUrl.hostname)

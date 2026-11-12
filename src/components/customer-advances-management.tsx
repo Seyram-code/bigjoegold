@@ -57,7 +57,8 @@ function messageFrom(body: unknown, fallback: string) {
 export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFulfill }: { canWrite: boolean; canCreateCustomer: boolean; canFulfill: boolean }) {
   const router = useRouter();
   const [advances, setAdvances] = useState<Advance[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [buyers, setBuyers] = useState<Customer[]>([]);
+  const [suppliers, setSuppliers] = useState<Customer[]>([]);
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [lots, setLots] = useState<Lot[]>([]);
   const [boardPrice, setBoardPrice] = useState<BoardPrice | null>(null);
@@ -141,7 +142,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         throw new Error("The customer service returned an invalid response");
       }
       const customer = body as Customer;
-      setCustomers((current) => [...current, customer]);
+      setBuyers((current) => [...current, customer]);
       setCustomerId(customer.id);
       setNewCustomer({ name: "", kind: "BUYER", type: "INDIVIDUAL", phone: "", alternativePhone: "", email: "", dateOfBirth: "", gender: "", idType: "", idNumber: "", tin: "", address: "", addressLine1: "", addressLine2: "", city: "", region: "", country: "Ghana", gpsLocation: "", notes: "" });
       setShowCustomerForm(false);
@@ -182,7 +183,8 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       const inventory = (inventoryBody ?? {}) as { lots?: Lot[] };
       const nextLots = (inventory.lots ?? []).filter((lot) => lot.status === "ACTIVE" && Number(lot.ledgerBalanceGrams) > 0);
       setAdvances(nextAdvances);
-      setCustomers([...nextBuyers, ...nextSuppliers]);
+      setBuyers(nextBuyers);
+      setSuppliers(nextSuppliers);
       setAccounts(nextAccounts);
       setLots(nextLots);
       setBoardPrice(advanceData.currentBoardPrice ?? null);
@@ -212,7 +214,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   }, [load]);
 
   const selectedAdvance = advances.find((advance) => advance.id === selectedAdvanceId);
-  const selectedSupplier = customers.find((customer) => customer.id === supplierId && customer.kind === "SUPPLIER");
+  const selectedSupplier = suppliers.find((supplier) => supplier.id === supplierId);
   const openRequests = advances.flatMap((advance) => advance.requests
     .filter((request) => Number(request.remainingGrams) > 0)
     .map((request) => ({ ...request, advance, customer: advance.customer })));
@@ -537,7 +539,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
           void submitOpeningBalance();
         }}>
           <FormField label="Supplier" htmlFor="supplier-opening-balance" className="xl:col-span-5">
-            <CustomerAutocomplete id="supplier-opening-balance" customers={customers.filter((customer) => customer.kind === "SUPPLIER")} value={supplierId} onChange={setSupplierId} placeholder="Search suppliers by name or ID" />
+            <CustomerAutocomplete id="supplier-opening-balance" customers={suppliers} value={supplierId} onChange={setSupplierId} placeholder="Search suppliers by name or ID" />
           </FormField>
           <FormField label="Amount owed to Big Joe (GHS)" htmlFor="supplier-opening-amount" className="xl:col-span-3">
             <GhanaAmountInput id="supplier-opening-amount" min="0.01" step="0.01" value={openingBalanceAmount} onChange={setOpeningBalanceAmount} className={fieldControlClass} />
@@ -553,12 +555,12 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       </section>
     </div>}
 
-    <div className="grid items-start gap-3 xl:grid-cols-2">
-      <Card>
+    <div className="grid items-start gap-3 xl:grid-cols-12">
+      <Card className="xl:col-span-4">
         <CardHeader><CardTitle>Record customer cash advance</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
           <div>
-            <FormField label="Customer" htmlFor="advance-customer"><CustomerAutocomplete id="advance-customer" customers={customers.filter((customer) => customer.kind === "BUYER")} value={customerId} onChange={setCustomerId} placeholder="Search customers by name or ID" /></FormField>
+            <FormField label="Customer" htmlFor="advance-customer"><CustomerAutocomplete id="advance-customer" customers={buyers} value={customerId} onChange={setCustomerId} placeholder="Search customers by name or ID" /></FormField>
             {canCreateCustomer && <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => { setError(""); setShowCustomerForm(true); }}><Plus size={14} /> Add new customer</Button>}
           </div>
           <FormField label="Amount received (GHS)" htmlFor="advance-amount"><GhanaAmountInput id="advance-amount" min="0.01" step="0.01" value={amount} onChange={setAmount} className={fieldControlClass} /></FormField>
@@ -613,7 +615,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         </div>
       </div>}
 
-      <Card>
+      <Card className="xl:col-span-4">
         <CardHeader><CardTitle>{selectedAdvance?.customer.kind === "SUPPLIER" ? "Record supplier payment or refund" : "Add funds or refund cash"}</CardTitle></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
           <FormField label="Advance account" htmlFor="advance-ledger"><select id="advance-ledger" value={selectedAdvanceId} onChange={(event) => setSelectedAdvanceId(event.target.value)} className={fieldControlClass}><option value="">Select an advance</option>{advances.map((advance) => <option key={advance.id} value={advance.id}>{advance.customer.name} · {advance.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {currency(advance.balance)}</option>)}</select></FormField>
@@ -627,7 +629,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="xl:col-span-4">
         <CardHeader><CardTitle>Record a gold request for an existing advance</CardTitle></CardHeader>
         <CardContent>
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { void submitGoldRequest(event); }}>
@@ -654,7 +656,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="xl:col-span-12">
         <CardHeader><CardTitle>Fulfill requested gold</CardTitle></CardHeader>
         <CardContent>
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={fulfillRequest}>
@@ -731,8 +733,8 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   {measurementModalOpen && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0c1521]/60 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setMeasurementModalOpen(false); }}>
     <section role="dialog" aria-modal="true" aria-labelledby="advance-measurement-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#e8ebef] bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,.3)] sm:p-6">
       <div className="flex items-start justify-between gap-4">
-        <div><h2 id="advance-measurement-title" className="text-xl font-bold tracking-tight text-[#17212f]">Gold measurement</h2><p className="mt-1 text-sm text-[#637083]">Enter the top and down weights. The configured assay formula and current selling board price calculate the value released from the customer advance.</p></div>
-        <button type="button" onClick={() => setMeasurementModalOpen(false)} aria-label="Close gold measurement" className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6]"><X size={16} /></button>
+    <div><h2 id="advance-measurement-title" className="text-xl font-bold tracking-tight text-[#17212f]">Gold measurement</h2><p className="mt-1 text-sm text-[#637083]">Enter the top and down weights. The configured assay formula and current selling board price calculate the value released from the customer advance.</p></div>
+    <button type="button" onClick={() => setMeasurementModalOpen(false)} aria-label="Close gold measurement" className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6]"><X size={16} /></button>
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <FormField label="Top weight (g)" htmlFor="advance-measurement-top" hint="Editing this updates the release weight and spreads the allocation across selected batches, up to their available stock.">

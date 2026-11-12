@@ -1,10 +1,12 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomInt, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomInt, randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import type { Prisma } from "@prisma/client";
 import type { Permission, StaffRole } from "@/lib/permissions";
 
 export function generateStaffAccessCode() {
-  return `BJG${randomInt(0, 10_000).toString().padStart(4, "0")}`;
+  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const characters = Array.from({ length: 16 }, () => alphabet[randomInt(alphabet.length)]).join("");
+  return `BJG-${characters.match(/.{1,4}/g)?.join("-")}`;
 }
 
 export function generateStaffAuthEmail() {
@@ -13,33 +15,14 @@ export function generateStaffAuthEmail() {
 
 export function hashStaffAccessCode(accessCode: string) {
   const normalized = accessCode.trim().toUpperCase();
-  return createHash("sha256").update(normalized).digest("hex");
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (!secret || secret.length < 32) throw new Error("BETTER_AUTH_SECRET must be configured with at least 32 characters.");
+  return createHmac("sha256", secret).update(`staff-access-code:${normalized}`).digest("hex");
 }
 
-function staffAccessCodeEncryptionKey() {
-  const configuredKey = process.env.STAFF_ACCESS_CODE_ENCRYPTION_KEY;
-  if (!configuredKey) throw new Error("STAFF_ACCESS_CODE_ENCRYPTION_KEY must be configured with a base64-encoded 32-byte key.");
-  const key = Buffer.from(configuredKey, "base64");
-  if (key.length !== 32) throw new Error("STAFF_ACCESS_CODE_ENCRYPTION_KEY must be a base64-encoded 32-byte key.");
-  return key;
-}
-
-export function encryptStaffAccessCode(accessCode: string) {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", staffAccessCodeEncryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(accessCode.trim().toUpperCase(), "utf8"), cipher.final()]);
-  return [iv, cipher.getAuthTag(), encrypted].map((part) => part.toString("base64url")).join(".");
-}
-
-export function decryptStaffAccessCode(encryptedAccessCode: string) {
-  const [encodedIv, encodedTag, encodedData, ...extra] = encryptedAccessCode.split(".");
-  if (!encodedIv || !encodedTag || !encodedData || extra.length) throw new Error("Stored staff access code has an invalid encrypted format.");
-  const decipher = createDecipheriv("aes-256-gcm", staffAccessCodeEncryptionKey(), Buffer.from(encodedIv, "base64url"));
-  decipher.setAuthTag(Buffer.from(encodedTag, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encodedData, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
+/** Temporary compatibility for codes issued before keyed hashes were introduced. */
+export function legacyStaffAccessCodeHash(accessCode: string) {
+  return createHash("sha256").update(accessCode.trim().toUpperCase()).digest("hex");
 }
 
 export function staffAccessCredentialPassword(accessCode: string) {
@@ -62,7 +45,6 @@ export async function createCredentialUser(
       email,
       phone: input.phone.trim(),
       accessCodeHash: hashStaffAccessCode(accessCode),
-      accessCodeEncrypted: encryptStaffAccessCode(accessCode),
       role: input.role,
       permissionOverrideSet: input.permissions !== undefined,
       ...(input.permissions !== undefined

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { ZodError, type ZodType } from "zod";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, Copy, Eye, KeyRound, Plus, ShieldCheck, UserRoundCheck, UserRoundX, X } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, KeyRound, Plus, ShieldCheck, UserRoundCheck, UserRoundX, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshButton } from "@/components/ui/refresh-button";
@@ -175,8 +175,6 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
   const [pendingOwnerPasswordReset, setPendingOwnerPasswordReset] = useState<Row | null>(null);
   const [ownerResetPassword, setOwnerResetPassword] = useState("");
   const [ownerResetConfirmation, setOwnerResetConfirmation] = useState("");
-  const [viewedAccessCode, setViewedAccessCode] = useState<{ name: string; code: string } | null>(null);
-  const [accessCodeCopied, setAccessCodeCopied] = useState(false);
   const [editingPermissions, setEditingPermissions] = useState<{ id: string; values: Permission[] } | null>(null);
   const [staffActionBusy, setStaffActionBusy] = useState(false);
   const [showForm, setShowForm] = useState(view?.openForm ?? false);
@@ -385,33 +383,6 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
     }
   }
 
-  async function viewAccessCode(row: Row) {
-    setError("");
-    setStaffActionBusy(true);
-    try {
-      const response = await fetch(`/api/staff/${String(row.id)}/access-code`, { cache: "no-store" });
-      const body: unknown = await response.json();
-      if (!response.ok) throw new Error(readMessage(body, "Unable to view the access code"));
-      if (!isRecord(body) || typeof body.accessCode !== "string" || typeof body.name !== "string") throw new Error("The server did not return an access code");
-      setViewedAccessCode({ name: body.name, code: body.accessCode });
-      setAccessCodeCopied(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to view the access code");
-    } finally {
-      setStaffActionBusy(false);
-    }
-  }
-
-  async function copyViewedAccessCode() {
-    if (!viewedAccessCode) return;
-    try {
-      await navigator.clipboard.writeText(viewedAccessCode.code);
-      setAccessCodeCopied(true);
-    } catch (cause) {
-      setError(cause instanceof Error ? `Unable to copy the access code: ${cause.message}` : "Unable to copy the access code");
-    }
-  }
-
   async function updateStaff(row: Row, values: Partial<{ role: string; isActive: boolean; permissions: Permission[] }>) {
     setError("");
     setStaffActionBusy(true);
@@ -590,15 +561,6 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
                 {staffRoles.filter((role) => role !== "OWNER" || row.role === "OWNER").map((role) => <option key={role} value={role}>{role.replaceAll("_", " ")}</option>)}
               </select>
               <div className="flex flex-wrap gap-1.5">
-                {row.role !== "OWNER" && Boolean(row.isActive) && <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 gap-1.5 border-[#e4e8ed] px-2.5 text-[11px] text-[#526071] hover:border-[#cbd3dd] hover:bg-[#f8f9fb]"
-                  disabled={staffActionBusy}
-                  onClick={() => { void viewAccessCode(row); }}
-                >
-                  <Eye size={13} /> View code
-                </Button>}
                 <Button
                   size="sm"
                   variant="outline"
@@ -694,36 +656,6 @@ export function OperationsPanel({ module, canWrite, canResetOwnerPassword = fals
       onCancel={() => setPendingCodeReset(null)}
       onConfirm={() => { if (pendingCodeReset) void generateAccessCode(pendingCodeReset); }}
     />
-    {viewedAccessCode && <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0c1521]/60 p-4 backdrop-blur-[2px]"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          setViewedAccessCode(null);
-          setAccessCodeCopied(false);
-        }
-      }}
-    >
-      <section role="dialog" aria-modal="true" aria-labelledby="staff-access-code-title" className="w-full max-w-md rounded-2xl border border-[#e8ebef] bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,.24)]">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 id="staff-access-code-title" className="text-base font-semibold text-[#17212f]">Staff access code</h2>
-            <p className="mt-1 text-sm text-[#74808d]">{viewedAccessCode.name}</p>
-          </div>
-          <Button type="button" size="sm" variant="ghost" aria-label="Close access code" onClick={() => { setViewedAccessCode(null); setAccessCodeCopied(false); }}><X size={16} /></Button>
-        </div>
-        <div className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-[#e8ebef] bg-[#f7f8fa] px-4 py-4">
-          <code className="select-all font-mono text-2xl font-bold tracking-[0.12em] text-[#17212f]">{viewedAccessCode.code}</code>
-          <Button type="button" variant="outline" className="shrink-0 gap-2" onClick={() => { void copyViewedAccessCode(); }}>
-            {accessCodeCopied ? <Check size={15} /> : <Copy size={15} />}
-            {accessCodeCopied ? "Copied" : "Copy"}
-          </Button>
-        </div>
-        <p className="mt-4 text-xs leading-5 text-[#74808d]">Share this code securely with the staff member. Viewing it has been recorded in the audit log.</p>
-        <div className="mt-6 flex justify-end">
-          <Button type="button" variant="gold" onClick={() => { setViewedAccessCode(null); setAccessCodeCopied(false); }}>Done</Button>
-        </div>
-      </section>
-    </div>}
     {pendingOwnerPasswordReset && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0c1521]/60 p-4 backdrop-blur-[2px]" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !staffActionBusy) setPendingOwnerPasswordReset(null);
     }}>

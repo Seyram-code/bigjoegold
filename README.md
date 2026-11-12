@@ -7,7 +7,7 @@ A locally run gold trading management application built with Next.js App Router,
 Requirements: Node.js 20+, npm, and MySQL 8+.
 
 1. Create a MySQL database and a dedicated local application user.
-2. Copy `.env.example` to `.env`. Set `DATABASE_URL`, a random `BETTER_AUTH_SECRET` (at least 32 characters), `BETTER_AUTH_URL`, `STAFF_ACCESS_CODE_ENCRYPTION_KEY`, and the initial owner's name, email, phone number, and a strong password of at least 12 characters. Generate the encryption key with `openssl rand -base64 32`; keep it secret and backed up, since losing it makes encrypted staff access codes unreadable.
+2. Copy `.env.example` to `.env`. Set `DATABASE_URL`, a random `BETTER_AUTH_SECRET` (at least 32 characters), `BETTER_AUTH_URL`, and the initial owner's name, email, phone number, and a strong password of at least 12 characters.
 3. Install dependencies and prepare the database:
 
    ```bash
@@ -17,9 +17,9 @@ Requirements: Node.js 20+, npm, and MySQL 8+.
    npm run db:seed
    ```
 
-4. Run `npm run dev` and sign in at `http://127.0.0.1:3000/login`. Owners use their email and password; staff use the one-time `BJG` plus four-digit access code issued by the owner.
+4. Run `npm run dev` and sign in at `http://127.0.0.1:3000/login`. Owners use their email and password; staff use the one-time long `BJG-XXXX-XXXX-XXXX-XXXX` access code issued by the owner.
 
-Do not commit `.env` or use example credentials outside a throwaway local setup. Staff accounts are created by an owner from the Staff screen using a name and phone number; their generated access codes are stored encrypted and can be viewed by an owner. Viewing a code is recorded in the audit log. Owner email/password sign-in is restricted to active owner accounts. Public account registration is disabled. Use `npm run db:deploy` to apply migrations outside development.
+Do not commit `.env` or use example credentials outside a throwaway local setup. Staff accounts are created by an owner from the Staff screen using a name and phone number; access codes are shown once when issued and cannot later be recovered. Owner email/password sign-in is restricted to active owner accounts. Public account registration is disabled. Use `npm run db:deploy` to apply migrations outside development.
 
 ### Owner SMS notifications
 

@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { apiError, readJson } from "@/lib/http";
 import { clearLoginFailures, getLoginLock, recordLoginFailure } from "@/lib/login-lockout";
 import { loginAttemptSource } from "@/lib/login-lockout-policy";
-import { hashStaffAccessCode, staffAccessCredentialPassword } from "@/lib/staff";
+import { hashStaffAccessCode, legacyStaffAccessCodeHash, staffAccessCredentialPassword } from "@/lib/staff";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -43,9 +43,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const isShortCode = /^BJG\d{4}$/.test(accessCode);
-    const user = await prisma.user.findUnique({
-      where: { accessCodeHash: hashStaffAccessCode(accessCode) },
+    const user = await prisma.user.findFirst({
+      where: { accessCodeHash: { in: [hashStaffAccessCode(accessCode), legacyStaffAccessCodeHash(accessCode)] } },
       select: { id: true, email: true, isActive: true, role: true },
     });
     const accountIdentifier = user ? `user:${user.id}` : null;
@@ -64,7 +63,7 @@ export async function POST(request: Request) {
       headers,
       body: JSON.stringify({
         email: user?.isActive && user.role !== "OWNER" ? user.email : invalidCodeEmail,
-        password: isShortCode ? staffAccessCredentialPassword(accessCode) : accessCode,
+        password: staffAccessCredentialPassword(accessCode),
       }),
     }));
     if (response.ok) {

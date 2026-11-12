@@ -1,39 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decryptStaffAccessCode, encryptStaffAccessCode, generateStaffAccessCode, generateStaffAuthEmail, hashStaffAccessCode, staffAccessCredentialPassword } from "../src/lib/staff";
+import { generateStaffAccessCode, generateStaffAuthEmail, hashStaffAccessCode, staffAccessCredentialPassword } from "../src/lib/staff";
 import { ownerCreateSchema, staffSchema } from "../src/lib/validation";
 
-test("staff access codes use the company prefix and four random digits", () => {
+test("staff access codes use the company prefix and 80 random bits", () => {
   const code = generateStaffAccessCode();
-  assert.match(code, /^BJG\d{4}$/);
+  assert.match(code, /^BJG-[A-HJ-NP-Z2-9]{4}(?:-[A-HJ-NP-Z2-9]{4}){3}$/);
   assert.notEqual(generateStaffAuthEmail(), generateStaffAuthEmail());
-  assert.equal(hashStaffAccessCode(code), hashStaffAccessCode(code.toLowerCase()));
-  assert.match(hashStaffAccessCode(code), /^[a-f0-9]{64}$/);
   const originalSecret = process.env.BETTER_AUTH_SECRET;
   process.env.BETTER_AUTH_SECRET = "test-secret-with-at-least-32-characters";
   try {
+    assert.equal(hashStaffAccessCode(code), hashStaffAccessCode(code.toLowerCase()));
+    assert.match(hashStaffAccessCode(code), /^[a-f0-9]{64}$/);
     assert.equal(staffAccessCredentialPassword(code), staffAccessCredentialPassword(code.toLowerCase()));
     assert.ok(staffAccessCredentialPassword(code).length >= 12);
   } finally {
     if (originalSecret === undefined) delete process.env.BETTER_AUTH_SECRET;
     else process.env.BETTER_AUTH_SECRET = originalSecret;
-  }
-});
-
-test("staff access codes can be stored encrypted and decrypted with the configured key", () => {
-  const originalKey = process.env.STAFF_ACCESS_CODE_ENCRYPTION_KEY;
-  process.env.STAFF_ACCESS_CODE_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
-  try {
-    const code = generateStaffAccessCode();
-    const encrypted = encryptStaffAccessCode(code);
-    assert.notEqual(encrypted, code);
-    assert.equal(decryptStaffAccessCode(encrypted), code);
-    const [iv, tag, data] = encrypted.split(".");
-    const tampered = `${iv}.${tag}.${data?.replace(/^./, (character) => character === "A" ? "B" : "A")}`;
-    assert.throws(() => decryptStaffAccessCode(tampered));
-  } finally {
-    if (originalKey === undefined) delete process.env.STAFF_ACCESS_CODE_ENCRYPTION_KEY;
-    else process.env.STAFF_ACCESS_CODE_ENCRYPTION_KEY = originalKey;
   }
 });
 
