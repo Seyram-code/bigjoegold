@@ -74,8 +74,12 @@ export function calculateMeasuredSaleQuote(
   sellingPrice: number | string,
   discountAmount: number | string = "0",
   rules: PurchaseFormulaRules = PURCHASE_CALCULATION_RULES,
+  applyKaratAdjustment = true,
 ) {
-  const measurements = calculatePurchaseMeasurements(topGrams, downGrams, sellingPrice, rules);
+  const saleRules = applyKaratAdjustment
+    ? rules
+    : { ...rules, karatDiscountMultiplier: "1" };
+  const measurements = calculatePurchaseMeasurements(topGrams, downGrams, sellingPrice, saleRules);
   const discount = new Prisma.Decimal(discountAmount);
   if (!discount.isFinite() || discount.isNegative() || discount.decimalPlaces() > 2) {
     throw new RangeError("Discount must be a valid non-negative amount in pesewas");

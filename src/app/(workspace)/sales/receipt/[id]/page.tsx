@@ -102,10 +102,13 @@ export default async function SaleReceiptPage({ params }: { params: Promise<{ id
             ["Pounds", `${formatDecimalTruncated(sale.saleMeasurement.pounds.toString(), 2)} lb`],
             ["Density", formatDecimalTruncated(sale.saleMeasurement.density.toString(), 2)],
             ["Karat", `${formatDecimalTruncated(sale.saleMeasurement.karat.toString(), 2)}K`],
+            ["Karat adjustment", sale.saleMeasurement.calculationSource === "sales_measurement_modal_no_karat_adjustment"
+              ? "Not applied"
+              : sale.saleMeasurement.calculationSource === "sales_measurement_modal" ? "Standard 0.7% applied" : "Saved formula"],
             ["Formula version", sale.saleMeasurement.formulaVersion],
           ].map(([label, value]) => <div key={label} className="bg-white p-3"><dt className="text-[10px] text-[#89929d]">{label}</dt><dd className="mt-1 break-words text-sm font-semibold text-[#263241]">{value}</dd></div>)}
         </dl>
-        <p className="mt-2 text-[10px] text-[#89929d]">Sale value was calculated from the recorded measurements and selling board price using the saved formula version.</p>
+        <p className="mt-2 text-[10px] text-[#89929d]">Sale value was calculated from the recorded measurements and selling board price using the saved formula version and karat adjustment shown above.</p>
       </section>}
 
       <section className="mt-6">

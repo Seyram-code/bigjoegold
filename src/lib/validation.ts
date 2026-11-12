@@ -120,6 +120,7 @@ export const saleSchema = z.object({
   purityBps: z.coerce.number().int().min(1).max(10000),
   pricePerGram: salePrice,
   discountAmount: saleMoney,
+  noKaratAdjustment: z.boolean().default(false),
   initialPayment: saleMoney.default("0"),
   cashAccountId: z.string().trim().optional().or(z.literal("")),
   method: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]).default("CASH"),

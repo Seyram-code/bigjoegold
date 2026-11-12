@@ -95,6 +95,7 @@ export async function POST(request: Request) {
         topGrams: input.topGrams,
         downGrams: input.downGrams,
         discountAmount: "0",
+        noKaratAdjustment: false,
         initialPayment: "0",
         cashAccountId: "",
         method: "OTHER" as const,

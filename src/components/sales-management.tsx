@@ -89,6 +89,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
   const [measurementDownGrams, setMeasurementDownGrams] = useState("");
   const [measurementConfirmed, setMeasurementConfirmed] = useState(false);
   const [measurementModalOpen, setMeasurementModalOpen] = useState(false);
+  const [noKaratAdjustment, setNoKaratAdjustment] = useState(false);
   const [discountAmount, setDiscountAmount] = useState("0");
   const [initialPayment, setInitialPayment] = useState("0");
   const [paymentAmountTouched, setPaymentAmountTouched] = useState(false);
@@ -116,13 +117,13 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
     if (!measurementTopGrams || !measurementDownGrams || !boardPrice) return { result: null, error: "" };
     try {
       return {
-        result: calculateMeasuredSaleQuote(measurementTopGrams, measurementDownGrams, pricePerGram, discountAmount, formulaRules),
+        result: calculateMeasuredSaleQuote(measurementTopGrams, measurementDownGrams, pricePerGram, discountAmount, formulaRules, !noKaratAdjustment),
         error: "",
       };
     } catch (cause) {
       return { result: null, error: cause instanceof Error ? cause.message : "Check the entered gold measurements" };
     }
-  }, [measurementTopGrams, measurementDownGrams, boardPrice, pricePerGram, discountAmount, formulaRules]);
+  }, [measurementTopGrams, measurementDownGrams, boardPrice, pricePerGram, discountAmount, formulaRules, noKaratAdjustment]);
   const allocationAdjustment = useMemo(() => {
     if (!allocations.length || !measurement.result) return { allocations: null, error: "" };
     try {
@@ -153,10 +154,10 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
   }, [measurementConfirmed, allocations.length, measurement.result, allocatedGramsDecimal]);
   const amountPaid = paymentAmountTouched ? initialPayment : "0";
   const selectedBuyer = buyers.find((buyer) => buyer.id === buyerId);
-  const selectableLots = lots.filter((lot) => lot.status === "ACTIVE"
-    && Number(lot.remainingGrams) > 0
-    && !allocations.some((allocation) => allocation.lotId === lot.id));
-  const availableStockGrams = lots.filter((lot) => lot.status === "ACTIVE").reduce((sum, lot) => sum + Math.max(0, Number(lot.remainingGrams)), 0);
+  const saleAvailableLots = lots.filter((lot) => lot.status === "ACTIVE"
+    && new Prisma.Decimal(lot.remainingGrams).greaterThan(0));
+  const selectableLots = saleAvailableLots.filter((lot) => !allocations.some((allocation) => allocation.lotId === lot.id));
+  const availableStockGrams = saleAvailableLots.reduce((sum, lot) => sum + Number(lot.remainingGrams), 0);
   const saleKarat = measurement.result ? formatTwoDecimalTruncated(measurement.result.karat.toString()) : "—";
 
   const load = useCallback(async (background = false) => {
@@ -282,6 +283,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
     setBuyerId("");
     updateAllocations([]);
     setSelectedLotIds([]);
+    setNoKaratAdjustment(false);
     setDiscountAmount("0");
     setInitialPayment("0");
     setPaymentAmountTouched(false);
@@ -326,6 +328,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
         pricePerGram,
         topGrams: measurementTopGrams,
         downGrams: measurementDownGrams,
+        noKaratAdjustment,
         discountAmount,
         initialPayment: amountPaid,
         cashAccountId,
@@ -474,10 +477,12 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
           <Card>
             <CardHeader><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-[#f5e3b0] text-[#795719]"><Coins size={16} /></span><CardTitle>Gold Details</CardTitle></div><p className="text-xs text-[#89929d]">Available stock: {formatWeight(availableStockGrams, "g", 2)}</p></CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="Stock batches" htmlFor="sale-batch"><StockAutocomplete id="sale-batch" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableLots.map((lot): StockOption => ({ id: lot.id, source: lot.trade?.customer?.name || lot.source || "Unknown customer", batchNumber: lot.batchNumber || lot.trade?.reference || "Unnumbered batch", receivedAt: lot.receivedAt, grams: lot.remainingGrams }))} /></FormField>
-                <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedBatches}><Plus size={14} /> Add selected batches</Button></div>
-              </div>
+              {selectableLots.length > 0
+                ? <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label="Stock batches" htmlFor="sale-batch"><StockAutocomplete id="sale-batch" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableLots.map((lot): StockOption => ({ id: lot.id, source: lot.trade?.customer?.name || lot.source || "Unknown customer", batchNumber: lot.batchNumber || lot.trade?.reference || "Unnumbered batch", receivedAt: lot.receivedAt, grams: lot.remainingGrams }))} /></FormField>
+                  <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedBatches}><Plus size={14} /> Add selected batches</Button></div>
+                </div>
+                : <p className="rounded-lg bg-[#fafbfc] p-3 text-xs text-[#89929d]">{saleAvailableLots.length > 0 ? "All available gold batches are already selected." : "No stock batches with a positive gram balance are available for sale."}</p>}
               {selectedLotIds.length > 0 && <p className="text-xs text-[#89929d]">Selected batches are added with their available weights. You can adjust each allocation below.</p>}
               {allocations.length > 0 ? <div className="space-y-2 rounded-lg border border-[#edf0f3] p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">Allocated batches</p>
@@ -498,6 +503,15 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
                   ? `Applied: ${formatTwoDecimalTruncated(measurement.result.karat.toString())}K · ${formatCurrency(measurement.result.total.toNumber())}`
                   : "Measure the gold to calculate its karat and sale price."}</p>
               </div>
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-[#e8ebef] p-3 text-xs text-[#465362]">
+                <input
+                  type="checkbox"
+                  checked={noKaratAdjustment}
+                  onChange={(event) => setNoKaratAdjustment(event.target.checked)}
+                  className="mt-0.5 accent-[#b88d24]"
+                />
+                <span><span className="font-semibold text-[#263342]">No 0.7% karat adjustment</span><span className="mt-1 block text-[11px] text-[#89929d]">Use the measured karat without the standard 0.993 adjustment. This is separate from the GHS sale discount.</span></span>
+              </label>
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField label="Product weight" htmlFor="sale-weight-kg"><input id="sale-weight-kg" readOnly value={formatWeight(allocatedGrams / 1000)} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
                 <FormField label="Weight (Pounds)" htmlFor="sale-weight-lb"><input id="sale-weight-lb" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.pounds.toString()) : "—"} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>

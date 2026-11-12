@@ -192,6 +192,17 @@ test("measured sales use the receiving assay formula and selling price", () => {
   assert.throws(() => calculateMeasuredSaleQuote("458.90", "24.2", "11230", "675624.97"), /Discount must be less/);
 });
 
+test("measured sales can opt out of the standard karat adjustment without changing the configured formula", () => {
+  const adjusted = calculateMeasuredSaleQuote("458.90", "24.2", "11230");
+  const unadjusted = calculateMeasuredSaleQuote("458.90", "24.2", "11230", "0", DEFAULT_PURCHASE_FORMULA_RULES, false);
+
+  assert.equal(adjusted.karat.toFixed(2), "23.37");
+  assert.equal(unadjusted.karat.toFixed(2), "23.54");
+  assert.ok(unadjusted.purityBps > adjusted.purityBps);
+  assert.ok(unadjusted.total.greaterThan(adjusted.total));
+  assert.equal(DEFAULT_PURCHASE_FORMULA_RULES.karatDiscountMultiplier, "0.993");
+});
+
 test("sale down weight sums each fully allocated batch's receiving down weight", () => {
   const downGrams = inferSaleDownWeightFromReceipts([
     { lotId: "BASA89YL", grams: "443.74" },
@@ -598,6 +609,9 @@ test("sales validation requires explicit batch allocations and audited correctio
     allocations: [{ lotId: "lot-id", grams: "750" }],
   };
   assert.equal(saleSchema.safeParse(validSale).success, true);
+  assert.equal(saleSchema.parse(validSale).noKaratAdjustment, false);
+  assert.equal(saleSchema.parse({ ...validSale, noKaratAdjustment: true }).noKaratAdjustment, true);
+  assert.equal(saleSchema.safeParse({ ...validSale, noKaratAdjustment: "true" }).success, false);
   const saleWithoutPaymentDetails = saleSchema.parse({
     ...validSale,
     initialPayment: undefined,

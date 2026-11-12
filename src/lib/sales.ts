@@ -78,13 +78,17 @@ export async function postSale(
       if (!balance.isFinite()) throw new HttpError("Unable to calculate the customer advance balance", 500);
       if (initialPayment.greaterThan(0)) throw new HttpError("Advance fulfillments cannot collect a sale payment in the same action", 400);
     }
-    const saleFormula = purchaseFormulaRules(await tx.purchaseFormulaConfig.findUnique({ where: { id: "default" } }));
+    const configuredSaleFormula = purchaseFormulaRules(await tx.purchaseFormulaConfig.findUnique({ where: { id: "default" } }));
+    const saleFormula = input.noKaratAdjustment
+      ? { ...configuredSaleFormula, karatDiscountMultiplier: "1" }
+      : configuredSaleFormula;
     const saleMeasurements = calculateMeasuredSaleQuote(
       input.topGrams ?? "",
       input.downGrams ?? "",
       currentBoardPrice.priceAmount.toString(),
       input.discountAmount,
-      saleFormula,
+      configuredSaleFormula,
+      !input.noKaratAdjustment,
     );
     if (!saleMeasurements.topGrams.equals(grossGrams)) {
       throw new HttpError("Top weight measurement must match the total grams allocated from stock batches", 400);
@@ -175,8 +179,11 @@ export async function postSale(
           karatMultiplier: saleFormula.karatMultiplier,
           karatDiscountMultiplier: saleFormula.karatDiscountMultiplier,
           amountKaratDivisor: saleFormula.amountKaratDivisor,
+          noKaratAdjustment: input.noKaratAdjustment,
         },
-        calculationSource: "sales_measurement_modal",
+        calculationSource: input.noKaratAdjustment
+          ? "sales_measurement_modal_no_karat_adjustment"
+          : "sales_measurement_modal",
       },
     });
 
@@ -259,6 +266,7 @@ export async function postSale(
         quantityKg: quantityKg.toString(),
         subtotal: subtotal.toString(),
         discountAmount: discountAmount.toString(),
+        noKaratAdjustment: input.noKaratAdjustment,
         amount: total.toString(),
         allocations: [...allocationsByLot].map(([lotId, grams]) => ({ lotId, grams: grams.toString() })),
         advanceFulfillment: fulfillment ? {
