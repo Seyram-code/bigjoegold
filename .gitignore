@@ -39,6 +39,10 @@ yarn-error.log*
 # Local production database exports are sensitive and must never be committed.
 prisma/*-before-business-reset-*.sql
 
+# Temporary Next.js config artifacts produced by managed build hosts.
+*.next.config.ts
+*.next.config.compiled.js
+
 # vercel
 .vercel
 
