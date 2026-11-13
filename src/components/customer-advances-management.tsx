@@ -85,6 +85,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const [measurementDownGrams, setMeasurementDownGrams] = useState("");
   const [measurementConfirmed, setMeasurementConfirmed] = useState(false);
   const [measurementModalOpen, setMeasurementModalOpen] = useState(false);
+  const [noKaratAdjustment, setNoKaratAdjustment] = useState(false);
   const [formulaRules, setFormulaRules] = useState<PurchaseFormulaRules>(DEFAULT_PURCHASE_FORMULA_RULES);
   const [transactionDate, setTransactionDate] = useState(localDateTime);
   const [loading, setLoading] = useState(true);
@@ -228,13 +229,13 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     if (!measurementTopGrams || !measurementDownGrams || !boardPrice) return { result: null, error: "" };
     try {
       return {
-        result: calculateMeasuredSaleQuote(measurementTopGrams, measurementDownGrams, String(boardPrice.priceAmount), "0", formulaRules),
+        result: calculateMeasuredSaleQuote(measurementTopGrams, measurementDownGrams, String(boardPrice.priceAmount), "0", formulaRules, !noKaratAdjustment),
         error: "",
       };
     } catch (cause) {
       return { result: null, error: cause instanceof Error ? cause.message : "Check the entered gold measurements" };
     }
-  }, [measurementTopGrams, measurementDownGrams, boardPrice, formulaRules]);
+  }, [measurementTopGrams, measurementDownGrams, boardPrice, formulaRules, noKaratAdjustment]);
   const allocationAdjustment = useMemo(() => {
     if (!fulfillmentAllocations.length || !measurement.result) return { allocations: null, error: "" };
     try {
@@ -476,6 +477,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
           pricePerGram: String(boardPrice.priceAmount),
           topGrams: measurementTopGrams,
           downGrams: measurementDownGrams,
+          noKaratAdjustment,
           note,
           allocations: fulfillmentAllocations,
         }),
@@ -490,6 +492,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       setMeasurementTopGrams("");
       setMeasurementDownGrams("");
       setMeasurementConfirmed(false);
+      setNoKaratAdjustment(false);
       setNote("");
       setGeneratingReceipt(true);
       router.push(`/sales/receipt/${encodeURIComponent(body.id)}`);
@@ -660,7 +663,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         <CardHeader><CardTitle>Fulfill requested gold</CardTitle></CardHeader>
         <CardContent>
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={fulfillRequest}>
-            <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setSelectedLotIds([]); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {request.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {formatWeight(request.remainingGrams, "g", 2)} requested</option>)}</select></FormField>
+            <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setSelectedLotIds([]); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); setNoKaratAdjustment(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {request.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {formatWeight(request.remainingGrams, "g", 2)} requested</option>)}</select></FormField>
             <FormField label="Select stock batches" htmlFor="fulfill-batches"><StockAutocomplete id="fulfill-batches" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableFulfillmentLots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
             <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedFulfillmentBatches}><Plus size={14} /> Add selected batches</Button></div>
             {selectedLotIds.length > 0 && <p className="text-xs text-[#89929d] sm:col-span-2">Selected batches are added with their available weights. Adjust each release amount below if needed.</p>}
@@ -688,6 +691,18 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
                 ? `Applied: ${formatTwoDecimalTruncated(measurement.result.karat.toString())}K · ${currency(measurement.result.total.toFixed(2))}`
                 : "Measure the gold to calculate its karat and value against the customer advance."}</p>
             </div>
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-[#e8ebef] p-3 text-xs text-[#465362] sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={noKaratAdjustment}
+                onChange={(event) => {
+                  setNoKaratAdjustment(event.target.checked);
+                  setMeasurementConfirmed(false);
+                }}
+                className="mt-0.5 accent-[#b88d24]"
+              />
+              <span><span className="font-semibold text-[#263342]">No 0.7% karat adjustment</span><span className="mt-1 block text-[11px] text-[#89929d]">Use the measured karat without the standard 0.993 adjustment. The calculated karat and gold value will update.</span></span>
+            </label>
             <FormField label="Gold purity (karat)" htmlFor="fulfill-purity" hint="Calculated from the gold measurements"><input id="fulfill-purity" type="number" readOnly value={measurement.result ? formatTwoDecimalTruncated(measurement.result.karat.toString()) : ""} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
             <FormField label="Current board price (GHS / pure g)" htmlFor="fulfill-price" hint={boardPrice ? `${boardPrice.source} · ${formatDate(boardPrice.effectiveAt)}` : "No compatible published price"}><input id="fulfill-price" readOnly value={boardPrice ? String(boardPrice.priceAmount) : ""} className={`${fieldControlClass} bg-[#f7f8fa]`} /></FormField>
             <FormField label="Release date" htmlFor="fulfill-date"><CalendarPicker id="fulfill-date" includeTime max={localDateTime()} required value={transactionDate} onChange={setTransactionDate} /></FormField>

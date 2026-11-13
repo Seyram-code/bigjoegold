@@ -195,6 +195,7 @@ export const customerAdvanceSchema = z.discriminatedUnion("action", [
     pricePerGram: salePrice,
     topGrams: saleMeasurementGrams,
     downGrams: saleMeasurementGrams,
+    noKaratAdjustment: z.boolean().default(false),
     note: optionalText,
     allocations: z.array(z.object({
       lotId: z.string().trim().min(1).max(191),

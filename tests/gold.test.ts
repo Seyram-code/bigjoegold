@@ -423,8 +423,8 @@ test("customer gold advance actions validate payment, request, and stock fulfill
     advanceId: "advance-id",
     requestedGrams: "4000",
   }).success, true);
-  assert.equal(customerAdvanceSchema.safeParse({
-    action: "FULFILL",
+  const fulfillment = {
+    action: "FULFILL" as const,
     requestId: "request-id",
     transactionDate: "2026-10-26T18:00:00.000Z",
     purityBps: 9999,
@@ -432,7 +432,14 @@ test("customer gold advance actions validate payment, request, and stock fulfill
     topGrams: "4000",
     downGrams: "220",
     allocations: [{ lotId: "lot-id", grams: "4000" }],
-  }).success, true);
+  };
+  assert.equal(customerAdvanceSchema.safeParse(fulfillment).success, true);
+  const defaultFulfillment = customerAdvanceSchema.parse(fulfillment);
+  assert.equal("noKaratAdjustment" in defaultFulfillment, true);
+  if ("noKaratAdjustment" in defaultFulfillment) assert.equal(defaultFulfillment.noKaratAdjustment, false);
+  const unadjustedFulfillment = customerAdvanceSchema.parse({ ...fulfillment, noKaratAdjustment: true });
+  if ("noKaratAdjustment" in unadjustedFulfillment) assert.equal(unadjustedFulfillment.noKaratAdjustment, true);
+  assert.equal(customerAdvanceSchema.safeParse({ ...fulfillment, noKaratAdjustment: "true" }).success, false);
   assert.equal(customerAdvanceSchema.safeParse({
     action: "FULFILL",
     requestId: "request-id",
