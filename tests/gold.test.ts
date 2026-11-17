@@ -419,10 +419,34 @@ test("customer gold advance actions validate payment, request, and stock fulfill
     note: "Customer requested refund",
   }).success, true);
   assert.equal(customerAdvanceSchema.safeParse({
+    action: "REFUND",
+    advanceId: "advance-id",
+    ...commonPayment,
+    note: "No",
+  }).success, false);
+  assert.equal(customerAdvanceSchema.safeParse({
     action: "CREATE_REQUEST",
     advanceId: "advance-id",
     requestedGrams: "4000",
   }).success, true);
+  assert.equal(customerAdvanceSchema.safeParse({
+    action: "CORRECT_REQUEST",
+    requestId: "request-id",
+    requestedGrams: "1534.62",
+    note: "Corrected unit entry",
+  }).success, true);
+  assert.equal(customerAdvanceSchema.safeParse({
+    action: "CORRECT_REQUEST",
+    requestId: "request-id",
+    requestedGrams: "1534.62",
+    note: "fix",
+  }).success, false);
+  assert.equal(customerAdvanceSchema.safeParse({
+    action: "CORRECT_REQUEST",
+    requestId: "request-id",
+    requestedGrams: "0",
+    note: "Corrected unit entry",
+  }).success, false);
   const fulfillment = {
     action: "FULFILL" as const,
     requestId: "request-id",
@@ -677,6 +701,16 @@ test("inventory mutation validation requires reasons, positive weights, and vali
     quantityGrams: "0",
     destinationLocation: "Vault",
     reason: "Approved movement",
+  }).success, false);
+  assert.equal(inventoryMovementSchema.safeParse({
+    action: "REMOVE_RESIDUAL",
+    lotId: "lot-id",
+    reason: "Removed residual stock under 10 g",
+  }).success, true);
+  assert.equal(inventoryMovementSchema.safeParse({
+    action: "REMOVE_RESIDUAL",
+    lotId: "lot-id",
+    reason: "dust",
   }).success, false);
 });
 

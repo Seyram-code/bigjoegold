@@ -146,13 +146,16 @@ export async function postInventoryMovement(
     throw new HttpError("Stock ledger shows a negative batch balance. Reconcile this batch before changing it.", 409);
   }
 
-  if (input.action === "ADJUST") {
+  if (input.action === "ADJUST" || input.action === "REMOVE_RESIDUAL") {
     if (lot.status === "QUARANTINED") throw new HttpError("Quarantined stock cannot be adjusted", 409);
-    const quantity = new Prisma.Decimal(input.quantityGrams);
+    if (input.action === "REMOVE_RESIDUAL" && (!balance.greaterThan(0) || !balance.lessThan(10))) {
+      throw new HttpError("Only positive stock balances below 10 g can be removed as residual stock", 409);
+    }
+    const quantity = input.action === "REMOVE_RESIDUAL" ? balance : new Prisma.Decimal(input.quantityGrams);
     if (quantity.decimalPlaces() > 5 || !quantity.isFinite() || !quantity.greaterThan(0)) {
       throw new HttpError("Adjustment weight exceeds supported stock precision", 400);
     }
-    const increase = input.direction === "IN";
+    const increase = input.action === "ADJUST" && input.direction === "IN";
     const nextBalance = increase ? balance.plus(quantity) : balance.minus(quantity);
     if (nextBalance.isNegative()) throw new HttpError("Adjustment cannot reduce stock below zero", 409);
     const movement = await tx.stockMovement.create({
@@ -173,12 +176,13 @@ export async function postInventoryMovement(
     });
     await addAudit(tx, {
       userId,
-      action: "inventory.adjusted",
+      action: input.action === "REMOVE_RESIDUAL" ? "inventory.residual_stock.removed" : "inventory.adjusted",
       entity: "InventoryLot",
       entityId: lot.id,
       details: {
         batchNumber: lot.batchNumber,
-        direction: input.direction,
+        direction: increase ? "IN" : "OUT",
+        removalType: input.action === "REMOVE_RESIDUAL" ? "RESIDUAL_STOCK_UNDER_10G" : null,
         quantityGrams: quantity.toString(),
         balanceBeforeGrams: balance.toString(),
         balanceAfterGrams: nextBalance.toString(),

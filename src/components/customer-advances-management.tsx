@@ -68,6 +68,9 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
   const [requestGrams, setRequestGrams] = useState("");
   const [requestGoldUnit, setRequestGoldUnit] = useState<"g" | "kg">("g");
   const [requestNote, setRequestNote] = useState("");
+  const [correctingRequestId, setCorrectingRequestId] = useState("");
+  const [correctedRequestGrams, setCorrectedRequestGrams] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [openingBalanceAmount, setOpeningBalanceAmount] = useState("");
@@ -221,7 +224,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     .map((request) => ({ ...request, advance, customer: advance.customer })));
   const selectedRequest = openRequests.find((request) => request.id === selectedRequestId);
   const selectableFulfillmentLots = lots.filter((lot) => lot.status === "ACTIVE"
-    && Number(lot.ledgerBalanceGrams) > 0
+    && Number(lot.ledgerBalanceGrams) >= 5
     && !fulfillmentAllocations.some((allocation) => allocation.lotId === lot.id));
   const allocatedFulfillmentDecimal = fulfillmentAllocations.reduce((sum, allocation) => sum.plus(allocation.grams), new Prisma.Decimal(0));
   const allocatedFulfillmentGrams = allocatedFulfillmentDecimal.toNumber();
@@ -281,7 +284,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
       return;
     }
     const selectedLots = selectedLotIds.map((selectedId) => lots.find((lot) => lot.id === selectedId));
-    if (selectedLots.some((lot) => !lot || lot.status !== "ACTIVE" || Number(lot.ledgerBalanceGrams) <= 0)) {
+    if (selectedLots.some((lot) => !lot || lot.status !== "ACTIVE" || Number(lot.ledgerBalanceGrams) < 5)) {
       setError("One or more selected batches are no longer available. Refresh inventory and try again.");
       return;
     }
@@ -298,6 +301,10 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
 
   async function submit(action: AdvanceAction) {
     setError("");
+    if (action === "REFUND" && note.trim().length < 5) {
+      setError("Enter a refund reason of at least 5 characters.");
+      return;
+    }
     if (!accountId) {
       setError("Create or select an active GHS cash or bank account first.");
       return;
@@ -432,6 +439,46 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     }
   }
 
+  function startCorrectingRequest(request: GoldRequest) {
+    setError("");
+    setCorrectingRequestId(request.id);
+    setCorrectedRequestGrams(String(request.requestedGrams));
+    setCorrectionReason("");
+  }
+
+  async function correctGoldRequest(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (!correctingRequestId || !correctedRequestGrams || correctionReason.trim().length < 5) {
+      setError("Enter the corrected requested grams and a reason of at least 5 characters.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch("/api/customer-advances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "CORRECT_REQUEST",
+          requestId: correctingRequestId,
+          requestedGrams: correctedRequestGrams,
+          note: correctionReason.trim(),
+        }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(body, "Unable to correct the gold request"));
+      setCorrectingRequestId("");
+      setCorrectedRequestGrams("");
+      setCorrectionReason("");
+      await load();
+      showToast("Requested gold corrected. Released gold and the advance balance were not changed.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to correct the gold request");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function fulfillRequest(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -441,6 +488,10 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
     }
     if (!fulfillmentAllocations.length) {
       setError("Add at least one stock batch and its fulfillment weight.");
+      return;
+    }
+    if (fulfillmentAllocations.some((allocation) => Number(lots.find((lot) => lot.id === allocation.lotId)?.ledgerBalanceGrams ?? 0) < 5)) {
+      setError("A selected batch now has less than 5 g available. Refresh inventory and select another batch.");
       return;
     }
     if (fulfillmentAllocations.some((allocation) => Number(allocation.grams) > Number(lots.find((lot) => lot.id === allocation.lotId)?.ledgerBalanceGrams ?? 0))) {
@@ -624,7 +675,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
           <FormField label="Advance account" htmlFor="advance-ledger"><select id="advance-ledger" value={selectedAdvanceId} onChange={(event) => setSelectedAdvanceId(event.target.value)} className={fieldControlClass}><option value="">Select an advance</option>{advances.map((advance) => <option key={advance.id} value={advance.id}>{advance.customer.name} · {advance.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {currency(advance.balance)}</option>)}</select></FormField>
           <FormField label={selectedAdvance?.customer.kind === "SUPPLIER" ? "Amount received (GHS)" : "Amount (GHS)"} htmlFor="advance-adjust-amount"><GhanaAmountInput id="advance-adjust-amount" min="0.01" step="0.01" value={amount} onChange={setAmount} className={fieldControlClass} /></FormField>
           <PaymentFields idPrefix="adjust-advance" accountId={accountId} setAccountId={setAccountId} accounts={accounts} method={method} setMethod={setMethod} paidAt={paidAt} setPaidAt={setPaidAt} />
-          <FormField label="Note / reason" htmlFor="advance-adjust-note"><input id="advance-adjust-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
+          <FormField label="Note / reason" htmlFor="advance-adjust-note" hint="Refunds require a reason of at least 5 characters."><input id="advance-adjust-note" value={note} onChange={(event) => setNote(event.target.value)} className={fieldControlClass} maxLength={500} /></FormField>
           {canWrite && <div className="flex flex-wrap gap-2 sm:col-span-2">
             <Button variant="gold" disabled={busy || loading || !selectedAdvanceId || !amount || !accountId} onClick={() => { void submit("ADD_FUNDS"); }}>{selectedAdvance?.customer.kind === "SUPPLIER" ? "Record payment received" : "Add funds"}</Button>
             <Button variant="outline" disabled={busy || loading || !selectedAdvanceId || !amount || !accountId || Number(selectedAdvance?.balance ?? 0) <= 0} onClick={() => { void submit("REFUND"); }}>{selectedAdvance?.customer.kind === "SUPPLIER" ? "Refund overpayment" : "Refund available credit"}</Button>
@@ -664,7 +715,7 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
         <CardContent>
           <form className="grid gap-3 sm:grid-cols-2" onSubmit={fulfillRequest}>
             <FormField label="Open gold request" htmlFor="fulfill-request"><select id="fulfill-request" required value={selectedRequestId} onChange={(event) => { setSelectedRequestId(event.target.value); setSelectedLotIds([]); setFulfillmentAllocations([]); setMeasurementTopGrams(""); setMeasurementDownGrams(""); setMeasurementConfirmed(false); setNoKaratAdjustment(false); }} className={fieldControlClass}><option value="">Select an open request</option>{openRequests.map((request) => <option key={request.id} value={request.id}>{request.customer.name} · {request.customer.kind === "SUPPLIER" ? "Supplier" : "Buyer"} · {formatWeight(request.remainingGrams, "g", 2)} requested</option>)}</select></FormField>
-            <FormField label="Select stock batches" htmlFor="fulfill-batches"><StockAutocomplete id="fulfill-batches" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableFulfillmentLots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
+            <FormField label="Select stock batches" htmlFor="fulfill-batches"><StockAutocomplete id="fulfill-batches" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches (5 g minimum)" lots={selectableFulfillmentLots.map((lot): StockOption => ({ id: lot.id, source: lot.source, batchNumber: lot.batchNumber, receivedAt: lot.receivedAt, grams: lot.ledgerBalanceGrams }))} /></FormField>
             <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedFulfillmentBatches}><Plus size={14} /> Add selected batches</Button></div>
             {selectedLotIds.length > 0 && <p className="text-xs text-[#89929d] sm:col-span-2">Selected batches are added with their available weights. Adjust each release amount below if needed.</p>}
             {fulfillmentAllocations.length > 0 && <div className="space-y-1 rounded-md border border-[#edf0f3] p-2 text-xs sm:col-span-2">
@@ -737,6 +788,13 @@ export function CustomerAdvancesManagement({ canWrite, canCreateCustomer, canFul
                   <div className="flex flex-wrap justify-between gap-2 text-xs"><span className="font-semibold text-[#344151]">{request.reference}</span><Badge tone={Number(request.remainingGrams) <= 0 ? "green" : request.fulfillments.length ? "gold" : "blue"}>{Number(request.remainingGrams) <= 0 ? "Fulfilled" : request.fulfillments.length ? "Partially fulfilled" : "Open"}</Badge></div>
                   <p className="mt-1 text-[11px] text-[#667382]">Requested {formatWeight(request.requestedGrams, "g", 2)} · Released {formatWeight(request.fulfilledGrams, "g", 2)} · Still requested {formatWeight(request.remainingGrams, "g", 2)} (optional; not a cash balance or debt)</p>
                   {request.fulfillments.map((fulfillment) => <div key={fulfillment.reference} className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-[#89929d]"><span>{fulfillment.reference}: {formatWeight(fulfillment.grams, "g", 2)} at GHS {fulfillment.pricePerGram}/pure g · {currency(fulfillment.amount)} · {fulfillment.trade.reference}</span><Button asChild size="sm" variant="outline"><Link href={`/sales/receipt/${encodeURIComponent(fulfillment.trade.id)}`}>Receipt</Link></Button></div>)}
+                  {canWrite && Number(request.remainingGrams) > 0 && correctingRequestId !== request.id && <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => startCorrectingRequest(request)}>Correct requested grams</Button>}
+                  {canWrite && correctingRequestId === request.id && <form className="mt-3 grid gap-2 rounded-md bg-[#fafbfc] p-3 sm:grid-cols-2" onSubmit={(event) => { void correctGoldRequest(event); }}>
+                    <FormField label="Corrected requested grams" htmlFor={`correct-request-${request.id}`}><input id={`correct-request-${request.id}`} type="number" min="0.00001" step="0.00001" required value={correctedRequestGrams} onChange={(event) => setCorrectedRequestGrams(event.target.value)} className={fieldControlClass} /></FormField>
+                    <FormField label="Reason for correction" htmlFor={`correct-request-reason-${request.id}`}><input id={`correct-request-reason-${request.id}`} required minLength={5} maxLength={500} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} className={fieldControlClass} /></FormField>
+                    <p className="text-[11px] text-[#667382] sm:col-span-2">The corrected total cannot be less than gold already released. This changes only the requested amount; releases and cash balances remain unchanged.</p>
+                    <div className="flex gap-2 sm:col-span-2"><Button type="submit" size="sm" variant="gold" disabled={busy || loading || !correctedRequestGrams || correctionReason.trim().length < 5}>Save correction</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setCorrectingRequestId("")}>Cancel</Button></div>
+                  </form>}
                 </div>)}</div> : <p className="text-xs text-[#89929d]">No gold requested on this advance.</p>}
               </div>
             </div>

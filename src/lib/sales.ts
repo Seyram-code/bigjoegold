@@ -128,6 +128,9 @@ export async function postSale(
       if (!ledgerBalance.equals(lot.remainingGrams)) {
         throw new HttpError(`Batch ${lot.batchNumber || lot.id} does not match its stock ledger. Reconcile inventory before selling.`, 409);
       }
+      if (ledgerBalance.lessThan(5)) {
+        throw new HttpError(`Batch ${lot.batchNumber || lot.id} has less than 5 g available and cannot be selected`, 409);
+      }
       if (lot.status !== "ACTIVE" || requested.greaterThan(ledgerBalance)) throw new HttpError("A selected batch no longer has enough available stock", 409);
     }
 

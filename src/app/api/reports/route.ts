@@ -99,7 +99,10 @@ export async function GET(request: Request) {
         ? prisma.inventoryLot.findMany({
           where: { remainingGrams: { gt: 0 } },
           orderBy: [{ batchNumber: "asc" }, { receivedAt: "asc" }],
-          include: { storageLocation: { select: { name: true } } },
+          include: {
+            storageLocation: { select: { name: true } },
+            trade: { select: { customer: { select: { name: true } } } },
+          },
         })
         : Promise.resolve(null),
       readPayments
@@ -532,6 +535,7 @@ export async function GET(request: Request) {
       id: lot.id,
       batchNumber: lot.batchNumber || "Unassigned",
       source: lot.source || "Unspecified",
+      customer: readCustomerDetails ? lot.trade?.customer?.name ?? "Unspecified" : lot.trade ? "Restricted customer" : "Unspecified",
       receivedAt: lot.receivedAt.toISOString(),
       remainingGrams: lot.remainingGrams.toNumber(),
       remainingKg: lot.remainingGrams.div(1000).toNumber(),

@@ -188,6 +188,12 @@ export const customerAdvanceSchema = z.discriminatedUnion("action", [
     note: optionalText,
   }).strict(),
   z.object({
+    action: z.literal("CORRECT_REQUEST"),
+    requestId: z.string().trim().min(1).max(191),
+    requestedGrams: saleGrams,
+    note: z.string().trim().min(5).max(500),
+  }).strict(),
+  z.object({
     action: z.literal("FULFILL"),
     requestId: z.string().trim().min(1).max(191),
     transactionDate: pastOrPresentDateTime("Fulfillment date"),
@@ -282,6 +288,11 @@ export const inventoryMovementSchema = z.discriminatedUnion("action", [
     lotId: z.string().trim().min(1).max(191),
     direction: z.enum(["IN", "OUT"]),
     quantityGrams: inventoryGrams,
+    reason: inventoryReason,
+  }).strict(),
+  z.object({
+    action: z.literal("REMOVE_RESIDUAL"),
+    lotId: z.string().trim().min(1).max(191),
     reason: inventoryReason,
   }).strict(),
   z.object({

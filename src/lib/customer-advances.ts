@@ -209,6 +209,51 @@ export async function recordCustomerAdvance(userId: string, input: Exclude<Custo
       return payment;
     }
 
+    if (input.action === "CORRECT_REQUEST") {
+      const requestRef = await tx.customerAdvanceRequest.findUnique({
+        where: { id: input.requestId },
+        select: { advanceId: true },
+      });
+      if (!requestRef) throw new HttpError("Customer gold request not found", 404);
+      const advance = await ensureAdvanceLocked(tx, requestRef.advanceId);
+      await tx.$queryRaw`SELECT id FROM CustomerAdvanceRequest WHERE id = ${input.requestId} FOR UPDATE`;
+      const request = await tx.customerAdvanceRequest.findUnique({
+        where: { id: input.requestId },
+        include: { fulfillments: { select: { grams: true } } },
+      });
+      if (!request) throw new HttpError("Customer gold request not found", 404);
+      const fulfilledGrams = request.fulfillments.reduce(
+        (sum, fulfillment) => sum.plus(fulfillment.grams),
+        new Prisma.Decimal(0),
+      );
+      const correctedGrams = new Prisma.Decimal(input.requestedGrams);
+      if (correctedGrams.lessThan(fulfilledGrams)) {
+        throw new HttpError("Requested grams cannot be less than the gold already released", 409);
+      }
+      if (correctedGrams.equals(request.requestedGrams)) {
+        throw new HttpError("The corrected request amount must differ from the current amount", 409);
+      }
+      const updatedRequest = await tx.customerAdvanceRequest.update({
+        where: { id: request.id },
+        data: { requestedGrams: correctedGrams },
+      });
+      await addAudit(tx, {
+        userId,
+        action: "customer.advance.gold_request.corrected",
+        entity: "CustomerAdvanceRequest",
+        entityId: request.id,
+        details: {
+          reference: request.reference,
+          advanceReference: advance.reference,
+          previousRequestedGrams: request.requestedGrams.toString(),
+          correctedRequestedGrams: correctedGrams.toString(),
+          fulfilledGrams: fulfilledGrams.toString(),
+          reason: input.note,
+        },
+      });
+      return updatedRequest;
+    }
+
     const advance = await ensureAdvanceLocked(tx, input.advanceId);
     return createGoldRequest(tx, advance, input.requestedGrams, input.note, userId);
   });

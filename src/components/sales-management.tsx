@@ -155,7 +155,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
   const amountPaid = paymentAmountTouched ? initialPayment : "0";
   const selectedBuyer = buyers.find((buyer) => buyer.id === buyerId);
   const saleAvailableLots = lots.filter((lot) => lot.status === "ACTIVE"
-    && new Prisma.Decimal(lot.remainingGrams).greaterThan(0));
+    && new Prisma.Decimal(lot.remainingGrams).greaterThanOrEqualTo(5));
   const selectableLots = saleAvailableLots.filter((lot) => !allocations.some((allocation) => allocation.lotId === lot.id));
   const availableStockGrams = saleAvailableLots.reduce((sum, lot) => sum + Number(lot.remainingGrams), 0);
   const saleKarat = measurement.result ? formatTwoDecimalTruncated(measurement.result.karat.toString()) : "—";
@@ -252,7 +252,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
       return;
     }
     const selectedLots = selectedLotIds.map((lotId) => lots.find((lot) => lot.id === lotId));
-    if (selectedLots.some((lot) => !lot || lot.status !== "ACTIVE" || Number(lot.remainingGrams) <= 0)) {
+    if (selectedLots.some((lot) => !lot || lot.status !== "ACTIVE" || Number(lot.remainingGrams) < 5)) {
       setError("One or more selected batches are no longer available. Refresh inventory and try again.");
       return;
     }
@@ -298,6 +298,10 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
     setError("");
     if (allocations.length === 0) {
       setError("Select at least one available stock batch.");
+      return;
+    }
+    if (allocations.some((allocation) => Number(lots.find((lot) => lot.id === allocation.lotId)?.remainingGrams ?? 0) < 5)) {
+      setError("A selected batch now has less than 5 g available. Refresh inventory and select another batch.");
       return;
     }
     if (!measurement.result || !measurementConfirmed) {
@@ -482,7 +486,7 @@ export function SalesManagement({ view, canWrite, canDiscount, canCreateBuyer }:
                   <FormField label="Stock batches" htmlFor="sale-batch"><StockAutocomplete id="sale-batch" multiple value={selectedLotIds} onChange={setSelectedLotIds} placeholder="Search and select batches" lots={selectableLots.map((lot): StockOption => ({ id: lot.id, source: lot.trade?.customer?.name || lot.source || "Unknown customer", batchNumber: lot.batchNumber || lot.trade?.reference || "Unnumbered batch", receivedAt: lot.receivedAt, grams: lot.remainingGrams }))} /></FormField>
                   <div className="flex items-end"><Button type="button" variant="outline" className="mb-0.5 h-10" disabled={!selectedLotIds.length} onClick={addSelectedBatches}><Plus size={14} /> Add selected batches</Button></div>
                 </div>
-                : <p className="rounded-lg bg-[#fafbfc] p-3 text-xs text-[#89929d]">{saleAvailableLots.length > 0 ? "All available gold batches are already selected." : "No stock batches with a positive gram balance are available for sale."}</p>}
+                : <p className="rounded-lg bg-[#fafbfc] p-3 text-xs text-[#89929d]">{saleAvailableLots.length > 0 ? "All eligible gold batches are already selected." : "No stock batches with at least 5 g are available for sale."}</p>}
               {selectedLotIds.length > 0 && <p className="text-xs text-[#89929d]">Selected batches are added with their available weights. You can adjust each allocation below.</p>}
               {allocations.length > 0 ? <div className="space-y-2 rounded-lg border border-[#edf0f3] p-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">Allocated batches</p>

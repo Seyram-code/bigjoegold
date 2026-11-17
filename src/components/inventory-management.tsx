@@ -51,6 +51,7 @@ type Lot = {
     status: string;
     priceUnit: string;
     boardPriceId: string | null;
+    customer: { name: string } | null;
     purchaseMeasurement: {
       topKg: string | number;
       downKg: string | number;
@@ -165,7 +166,13 @@ export function InventoryManagement({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const { success: showToast } = useToast();
-  const [pendingMovement, setPendingMovement] = useState<{ action: string; values: Record<string, unknown> } | null>(null);
+  const [pendingMovement, setPendingMovement] = useState<{
+    action: string;
+    values: Record<string, unknown>;
+    title?: string;
+    description?: string;
+    confirmLabel?: string;
+  } | null>(null);
   const [stocktake, setStocktake] = useState<StocktakeSession | null>(null);
   const [stocktakeHistory, setStocktakeHistory] = useState<StocktakeHistory[]>([]);
   const [confirmStocktake, setConfirmStocktake] = useState(false);
@@ -284,7 +291,7 @@ export function InventoryManagement({
       });
       const body: unknown = await response.json();
       if (!response.ok) throw new Error(messageFrom(body, "Unable to post the stock movement"));
-      showToast(action === "TRANSFER" ? "The batch transfer was recorded as paired stock movements." : action === "RECONCILE" ? "The physical count was reconciled through an audited correction movement." : action === "OPENING" ? "Opening stock and its ledger entry were recorded." : "Stock adjustment and its ledger entry were recorded.");
+      showToast(action === "TRANSFER" ? "The batch transfer was recorded as paired stock movements." : action === "RECONCILE" ? "The physical count was reconciled through an audited correction movement." : action === "OPENING" ? "Opening stock and its ledger entry were recorded." : action === "REMOVE_RESIDUAL" ? "Residual stock was removed and current stock was updated." : "Stock adjustment and its ledger entry were recorded.");
       setPendingMovement(null);
       setForm((current) => ({ ...current, quantityKg: "", quantityGrams: "", countedGrams: "", reason: "", batchNumber: "" }));
       await load();
@@ -642,16 +649,27 @@ export function InventoryManagement({
     {["current", "batches", "alerts"].includes(view) && <LotsTable
       lots={view === "alerts" ? alertLots : lots}
       showAlerts={view === "alerts"}
+      canRemoveResidual={canAdjust && view !== "alerts"}
       canEditMeasurements={canEditMeasurements && view !== "alerts"}
+      onRemoveResidual={(lot) => setPendingMovement({
+        action: "REMOVE_RESIDUAL",
+        values: {
+          lotId: lot.id,
+          reason: "Removed residual stock under 10 g",
+        },
+        title: "Remove residual stock?",
+        description: `This will remove the remaining ${formatWeight(lot.ledgerBalanceGrams, "g", 5)} from batch ${lot.batchNumber || lot.trade?.reference || "Unassigned"} using an audited stock adjustment. The movement history will remain, and current stock will be updated.`,
+        confirmLabel: "Remove residual stock",
+      })}
       onEditMeasurement={startMeasurementEdit}
     />}
     {view === "movements" && <Card><CardHeader><CardTitle>Immutable stock ledger</CardTitle><p className="mt-1 text-xs text-[#75808d]">{loading ? "Loading ledger…" : `Page ${page} of ${pageCount}`}</p></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[1100px] border-collapse text-left text-xs"><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Movement</th><th className="px-4 py-3">Reference / batch</th><th className="px-4 py-3">Trade</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Location / transfer</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Recorded by</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3"><Badge tone={movement.type.includes("OUT") || movement.type === "SALE_ISSUE" ? "red" : "green"}>{movementLabel(movement.type)}</Badge></td><td className="px-4 py-3 font-medium text-[#344151]">{movement.reference}<span className="block text-[10px] text-[#87919d]">{movement.inventoryLot?.batchNumber || "—"}</span></td><td className="px-4 py-3">{movement.trade?.reference ?? "—"}</td><td className="px-4 py-3">{formatWeight(movement.quantityGrams, "g", 2)}</td><td className="px-4 py-3">{movement.transferReference ? `${movement.fromLocation?.name ?? "—"} → ${movement.toLocation?.name ?? "—"}` : movement.location?.name ?? "—"}</td><td className="max-w-[250px] px-4 py-3">{movement.reason ?? "—"}</td><td className="px-4 py-3">{new Date(movement.movementDate).toLocaleString("en-GH", { dateStyle: "medium", timeStyle: "short" })}</td><td className="px-4 py-3">{movement.createdBy.name}</td></tr>)}</tbody></table>{!loading && movements.length === 0 && <p className="p-8 text-center text-xs text-[#89929d]">No stock movements have been recorded.</p>}<div className="flex items-center justify-between border-t border-[#edf0f3] px-4 py-3"><Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((current) => current - 1)}>Previous</Button><span className="text-xs text-[#75808d]">Page {page} / {pageCount}</span><Button variant="outline" size="sm" disabled={page >= pageCount || loading} onClick={() => setPage((current) => current + 1)}>Next</Button></div></CardContent></Card>}
     <ConfirmDialog
       open={Boolean(pendingMovement)}
-      title={`Confirm ${pendingMovement?.action === "RECONCILE" ? "stock reconciliation" : pendingMovement?.action === "TRANSFER" ? "stock transfer" : pendingMovement?.action === "ADJUST" ? "stock adjustment" : "opening stock"}`}
-      description="This action creates permanent stock ledger entries and cannot be erased. Verify the batch, quantity, location, and reason before continuing."
-      confirmLabel="Record stock movement"
-      destructive={pendingMovement?.action === "ADJUST" || pendingMovement?.action === "RECONCILE"}
+      title={pendingMovement?.title ?? `Confirm ${pendingMovement?.action === "RECONCILE" ? "stock reconciliation" : pendingMovement?.action === "TRANSFER" ? "stock transfer" : pendingMovement?.action === "ADJUST" ? "stock adjustment" : "opening stock"}`}
+      description={pendingMovement?.description ?? "This action creates permanent stock ledger entries and cannot be erased. Verify the batch, quantity, location, and reason before continuing."}
+      confirmLabel={pendingMovement?.confirmLabel ?? "Record stock movement"}
+      destructive={pendingMovement?.action === "ADJUST" || pendingMovement?.action === "REMOVE_RESIDUAL" || pendingMovement?.action === "RECONCILE"}
       busy={busy}
       onCancel={() => setPendingMovement(null)}
       onConfirm={() => { void commitMovement(); }}
@@ -756,14 +774,58 @@ function ReasonField({ id, value, onChange }: { id: string; value: string; onCha
   return <FormField label="Reason (required for audit)" htmlFor={id}><input id={id} required minLength={5} maxLength={500} value={value} onChange={(event) => onChange(event.target.value)} className={fieldControlClass} /></FormField>;
 }
 
-function LotsTable({ lots, showAlerts, canEditMeasurements, onEditMeasurement }: { lots: Lot[]; showAlerts: boolean; canEditMeasurements: boolean; onEditMeasurement: (lot: Lot) => void }) {
-  return <Card><CardHeader><CardTitle>{showAlerts ? "Batches needing attention" : "Stock by batch"}</CardTitle><p className="mt-1 text-xs text-[#75808d]">Remaining quantity is derived from the batch’s recorded stock movements.</p></CardHeader><CardContent className="overflow-x-auto p-0"><table className={`w-full ${canEditMeasurements ? "min-w-[1600px]" : "min-w-[1500px]"} border-collapse text-left text-xs`}><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Batch / source</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Weight (g)</th><th className="px-4 py-3">Top (g)</th><th className="px-4 py-3">Down (g)</th><th className="px-4 py-3">Pounds</th><th className="px-4 py-3">Density</th><th className="px-4 py-3">Karat</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Cost / g</th><th className="px-4 py-3">Remaining (g)</th><th className="px-4 py-3">Status</th>{canEditMeasurements && <th className="px-4 py-3">Actions</th>}</tr></thead><tbody>{lots.map((lot) => {
+function LotsTable({
+  lots,
+  showAlerts,
+  canRemoveResidual,
+  canEditMeasurements,
+  onRemoveResidual,
+  onEditMeasurement,
+}: {
+  lots: Lot[];
+  showAlerts: boolean;
+  canRemoveResidual: boolean;
+  canEditMeasurements: boolean;
+  onRemoveResidual: (lot: Lot) => void;
+  onEditMeasurement: (lot: Lot) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLocaleLowerCase();
+  const filteredLots = query
+    ? lots.filter((lot) => [
+      lot.trade?.customer?.name,
+      lot.source,
+      lot.batchNumber,
+      lot.trade?.reference,
+      lot.storageLocation?.name,
+      lot.status,
+    ].some((value) => String(value ?? "").toLocaleLowerCase().includes(query)))
+    : lots;
+
+  return <Card>
+    <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
+      <div>
+        <CardTitle>{showAlerts ? "Batches needing attention" : "Stock by batch"}</CardTitle>
+        <p className="mt-1 text-xs text-[#75808d]">Remaining quantity is derived from the batch’s recorded stock movements.</p>
+      </div>
+      {!showAlerts && <input
+        type="search"
+        aria-label="Search stock by customer or supplier"
+        placeholder="Search customer stocks…"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        className="h-10 w-full rounded-lg border border-[#dfe4e9] bg-white px-3 text-sm outline-none transition focus:border-[#bc8c36] focus:ring-4 focus:ring-[#bc8c36]/10 sm:max-w-xs"
+      />}
+    </CardHeader>
+    <CardContent className="overflow-x-auto p-0"><table className={`w-full ${canEditMeasurements || canRemoveResidual ? "min-w-[1650px]" : "min-w-[1500px]"} border-collapse text-left text-xs`}><thead><tr className="border-y border-[#edf0f3] bg-[#fafbfc] text-[10px] uppercase tracking-wide text-[#89929d]"><th className="px-4 py-3">Batch / source</th><th className="px-4 py-3">Received</th><th className="px-4 py-3">Weight (g)</th><th className="px-4 py-3">Top (g)</th><th className="px-4 py-3">Down (g)</th><th className="px-4 py-3">Pounds</th><th className="px-4 py-3">Density</th><th className="px-4 py-3">Karat</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Cost / g</th><th className="px-4 py-3">Remaining (g)</th><th className="px-4 py-3">Status</th>{(canEditMeasurements || canRemoveResidual) && <th className="px-4 py-3">Actions</th>}</tr></thead><tbody>{filteredLots.map((lot) => {
     const measurement = lot.trade?.purchaseMeasurement;
     const topGrams = measurement ? Number(measurement.topKg) * 1000 : null;
     const downGrams = measurement ? Number(measurement.downKg) * 1000 : null;
     const pounds = measurement?.pounds ?? lot.pounds;
     const density = measurement?.density ?? lot.density;
     const karat = measurement?.karat ?? lot.purityBps / 10000 * 24;
-    return <tr key={lot.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3 font-medium text-[#344151]">{lot.batchNumber || lot.trade?.reference || "—"}<span className="block text-[10px] text-[#87919d]">{lot.source || lot.trade?.reference || "Unknown source"}</span></td><td className="px-4 py-3">{new Date(lot.receivedAt).toLocaleDateString("en-GH")}</td><td className="px-4 py-3">{formatWeight(lot.originalGrams, "g", 2)}</td><td className="px-4 py-3">{topGrams === null ? "—" : formatDecimalTruncated(topGrams, 2)}</td><td className="px-4 py-3">{downGrams === null ? "—" : formatDecimalTruncated(downGrams, 2)}</td><td className="px-4 py-3">{pounds === null ? "—" : formatDecimalTruncated(pounds, 2)}</td><td className="px-4 py-3">{density === null ? "—" : formatDecimalTruncated(density, 2)}</td><td className="px-4 py-3">{formatDecimalTruncated(karat, 2)}</td><td className="px-4 py-3">{lot.storageLocation?.name ?? "—"}</td><td className="px-4 py-3">{formatCurrency(Number(lot.costPerGram))}</td><td className="px-4 py-3 font-semibold text-[#344151]">{formatWeight(lot.ledgerBalanceGrams, "g", 2)}</td><td className="px-4 py-3"><Badge tone={lot.cacheMismatch || Number(lot.ledgerBalanceGrams) < 0 ? "red" : lot.status === "DEPLETED" ? "gold" : "green"}>{lot.cacheMismatch ? "Ledger mismatch" : Number(lot.ledgerBalanceGrams) < 0 ? "Negative ledger" : lot.status}</Badge></td>{canEditMeasurements && <td className="px-4 py-3"><Button size="sm" variant="outline" disabled={!lot.measurementEditable} title={lot.measurementEditable ? "Edit the purchase measurements" : "Only untouched, eligible purchase batches can be edited."} onClick={() => onEditMeasurement(lot)}><Pencil size={13} /> Edit</Button>{!lot.measurementEditable && <span className="mt-1 block text-[10px] text-[#89929d]">Unavailable</span>}</td>}</tr>;
-  })}</tbody></table>{lots.length === 0 && <p className="p-8 text-center text-xs text-[#89929d]">{showAlerts ? "No stock reconciliation alerts." : "No stock batches have been recorded."}</p>}</CardContent></Card>;
+    const remainingGrams = Number(lot.ledgerBalanceGrams);
+    const removableResidual = canRemoveResidual && !lot.cacheMismatch && lot.status !== "QUARANTINED" && remainingGrams > 0 && remainingGrams < 10;
+    return <tr key={lot.id} className="border-b border-[#f0f2f4] text-[#63707e]"><td className="px-4 py-3 font-medium text-[#344151]">{lot.batchNumber || lot.trade?.reference || "—"}<span className="block text-[10px] text-[#87919d]">{lot.trade?.customer?.name || lot.source || lot.trade?.reference || "Unknown source"}</span></td><td className="px-4 py-3">{new Date(lot.receivedAt).toLocaleDateString("en-GH")}</td><td className="px-4 py-3">{formatWeight(lot.originalGrams, "g", 2)}</td><td className="px-4 py-3">{topGrams === null ? "—" : formatDecimalTruncated(topGrams, 2)}</td><td className="px-4 py-3">{downGrams === null ? "—" : formatDecimalTruncated(downGrams, 2)}</td><td className="px-4 py-3">{pounds === null ? "—" : formatDecimalTruncated(pounds, 2)}</td><td className="px-4 py-3">{density === null ? "—" : formatDecimalTruncated(density, 2)}</td><td className="px-4 py-3">{formatDecimalTruncated(karat, 2)}</td><td className="px-4 py-3">{lot.storageLocation?.name ?? "—"}</td><td className="px-4 py-3">{formatCurrency(Number(lot.costPerGram))}</td><td className="px-4 py-3 font-semibold text-[#344151]">{formatWeight(lot.ledgerBalanceGrams, "g", 2)}</td><td className="px-4 py-3"><Badge tone={lot.cacheMismatch || Number(lot.ledgerBalanceGrams) < 0 ? "red" : lot.status === "DEPLETED" ? "gold" : "green"}>{lot.cacheMismatch ? "Ledger mismatch" : Number(lot.ledgerBalanceGrams) < 0 ? "Negative ledger" : lot.status}</Badge></td>{(canEditMeasurements || canRemoveResidual) && <td className="px-4 py-3">{removableResidual && <Button size="sm" variant="danger" disabled={lot.cacheMismatch} onClick={() => onRemoveResidual(lot)}>Remove &lt;10 g</Button>}{canEditMeasurements && <><Button size="sm" variant="outline" disabled={!lot.measurementEditable} title={lot.measurementEditable ? "Edit the purchase measurements" : "Only untouched, eligible purchase batches can be edited."} onClick={() => onEditMeasurement(lot)}><Pencil size={13} /> Edit</Button>{!lot.measurementEditable && <span className="mt-1 block text-[10px] text-[#89929d]">Unavailable</span>}</>}</td>}</tr>;
+  })}</tbody></table>{filteredLots.length === 0 && <p className="p-8 text-center text-xs text-[#89929d]">{query ? "No stock batches match your search." : lots.length === 0 ? showAlerts ? "No stock reconciliation alerts." : "No stock batches have been recorded." : "No stock batches match your search."}</p>}</CardContent></Card>;
 }

@@ -25,6 +25,7 @@ const UNASSIGNED_ACCOUNT = "__unassigned__";
 type StatementRow = {
   id: string;
   date: string;
+  financingType?: "Supplier gold advance" | "Customer gold advance" | "Buyer gold financing";
   account: string;
   activity: string;
   reference: string;
@@ -34,13 +35,16 @@ type StatementRow = {
   balance: number;
 };
 type FinancingStatement = {
-  type: "customer-advances" | "buyer-financing";
+  type: "customer-advances" | "buyer-financing" | "combined-financing";
   customerKind: "BUYER" | "SUPPLIER";
   customerName: string;
   customerCode: string;
   customerPhone: string | null;
   phoneRestricted: boolean;
   balance: number;
+  supplierAdvanceBalance?: number;
+  customerAdvanceBalance?: number;
+  buyerFinancingBalance?: number;
   rows: StatementRow[];
 };
 type ReportData = {
@@ -86,7 +90,7 @@ type Column = {
   label: string;
   format?: "currency" | "kg" | "grams" | "date" | "day" | "percent";
 };
-type TabId = "overview" | "trading" | "inventory" | "customers" | "customer-advances" | "buyer-financing" | "payments" | "payment-methods" | "cash-flow" | "expenses" | "movements" | "staff" | "board";
+type TabId = "overview" | "trading" | "inventory" | "customers" | "customer-advances" | "buyer-financing" | "combined-financing" | "payments" | "payment-methods" | "cash-flow" | "expenses" | "movements" | "staff" | "board";
 
 const tabs: Array<{ id: TabId; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -95,6 +99,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
   { id: "customers", label: "Customer history" },
   { id: "customer-advances", label: "Supplier gold advances" },
   { id: "buyer-financing", label: "Customer gold financing" },
+  { id: "combined-financing", label: "Combined financing audit" },
   { id: "payments", label: "Payments & balances" },
   { id: "payment-methods", label: "Account statements" },
   { id: "cash-flow", label: "Cash flow" },
@@ -131,12 +136,35 @@ function displayValue(value: unknown, format?: Column["format"]) {
   return text(value);
 }
 
+function combinedBalanceRows(row: ReportRow) {
+  return [
+    {
+      type: "Supplier advance",
+      accounts: row.supplierAdvanceAccounts,
+      balance: row.supplierAdvanceBalance,
+      meaning: row.supplierAdvanceBalanceMeaning,
+    },
+    {
+      type: "Customer advance",
+      accounts: row.customerAdvanceAccounts,
+      balance: row.customerAdvanceBalance,
+      meaning: row.customerAdvanceBalanceMeaning,
+    },
+    {
+      type: "Buyer financing",
+      accounts: row.buyerFinancingAccounts,
+      balance: row.buyerFinancingBalance,
+      meaning: row.buyerFinancingBalanceMeaning,
+    },
+  ].filter((balance) => typeof balance.accounts === "string" && balance.accounts.length > 0);
+}
+
 function ReportTable({ rows, columns, emptyMessage, onCustomerClick, onStatementClick }: {
   rows: ReportRow[];
   columns: Column[];
   emptyMessage?: string;
   onCustomerClick?: (customerId: string) => void;
-  onStatementClick?: (customerId: string, customerName: string) => void;
+  onStatementClick?: (customerId: string, customerName: string, type: FinancingStatement["type"]) => void;
 }) {
   return <div className="overflow-x-auto rounded-lg border border-[#e8ebef]">
     <table className="w-full min-w-[720px] text-left text-xs">
@@ -146,8 +174,36 @@ function ReportTable({ rows, columns, emptyMessage, onCustomerClick, onStatement
       <tbody className="divide-y divide-[#edf0f2] bg-white">
         {rows.map((row, index) => <tr key={String(row.id ?? row.reference ?? row.period ?? index)} className="text-[#495564]">
           {columns.map((column) => <td key={column.key} className={column.key === "statement" ? "whitespace-nowrap px-4 py-3" : "max-w-[280px] truncate whitespace-nowrap px-4 py-3"}>
-            {column.key === "statement" && typeof row.customerId === "string" && onStatementClick
-              ? <Button type="button" variant="outline" size="sm" onClick={() => onStatementClick(String(row.customerId), String(row.customer ?? "Customer"))}><Printer size={13} /> Generate statement</Button>
+            {column.key === "balances" && row.type === "combined-financing"
+              ? <details className="min-w-[220px]">
+                <summary className="cursor-pointer font-medium text-[#8d641f]">View balances ({combinedBalanceRows(row).length})</summary>
+                <div className="mt-2 overflow-x-auto rounded-md border border-[#e8ebef]">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="bg-[#f7f8fa] text-[#7c8793]"><tr>
+                      <th className="px-2 py-1.5 font-semibold">Financing type</th>
+                      <th className="px-2 py-1.5 font-semibold">Account(s)</th>
+                      <th className="px-2 py-1.5 text-right font-semibold">Balance</th>
+                      <th className="px-2 py-1.5 font-semibold">Meaning</th>
+                    </tr></thead>
+                    <tbody className="divide-y divide-[#edf0f2]">{combinedBalanceRows(row).map((balance) => <tr key={balance.type}>
+                      <td className="px-2 py-1.5">{balance.type}</td>
+                      <td className="px-2 py-1.5">{text(balance.accounts)}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right">{currency(balance.balance)}</td>
+                      <td className="px-2 py-1.5">{text(balance.meaning)}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+              </details>
+              : column.key === "statement" && typeof row.customerId === "string" && onStatementClick
+              ? <Button type="button" variant="outline" size="sm" onClick={() => onStatementClick(
+                row.type === "combined-financing" && typeof row.statementCustomerIds === "string"
+                  ? row.statementCustomerIds
+                  : String(row.customerId),
+                String(row.customer ?? "Customer"),
+                row.type === "combined-financing"
+                  ? "combined-financing"
+                  : row.type === "Customer gold advance" ? "customer-advances" : "buyer-financing",
+              )}><Printer size={13} /> Generate statement</Button>
               : column.key === "customer" && typeof row.customerId === "string" && onCustomerClick
               ? <button type="button" onClick={() => onCustomerClick(String(row.customerId))} className="font-medium text-left text-[#8d641f] hover:underline">{displayValue(row.customer)}</button>
               : displayValue(row[column.key], column.format)}
@@ -164,6 +220,81 @@ function Metric({ label, value }: { label: string; value: string }) {
     <p className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">{label}</p>
     <p className="mt-2 text-lg font-semibold tracking-tight text-[#17212f]">{value}</p>
   </div>;
+}
+
+function combineFinancingAccounts(accounts: ReportRow[]): ReportRow[] {
+  const grouped = new Map<string, {
+    id: string;
+    customerId: string | null;
+    customerIds: Set<string>;
+    customer: string;
+    supplierAdvanceAccounts: string[];
+    supplierAdvanceBalance: number;
+    supplierAdvanceBalanceMeaning: string;
+    customerAdvanceAccounts: string[];
+    customerAdvanceBalance: number;
+    customerAdvanceBalanceMeaning: string;
+    buyerFinancingAccounts: string[];
+    buyerFinancingBalance: number;
+    buyerFinancingBalanceMeaning: string;
+  }>();
+
+  for (const account of accounts) {
+    const customerId = typeof account.customerId === "string" ? account.customerId : null;
+    const customer = String(account.customer ?? "Unspecified");
+    const normalizedName = customer.trim().replace(/\s+/g, " ").toLowerCase();
+    const id = normalizedName && normalizedName !== "restricted customer" && normalizedName !== "unspecified"
+      ? `name:${normalizedName}`
+      : `account:${String(account.id)}`;
+    let combined = grouped.get(id);
+    if (!combined) {
+      combined = {
+        id: `combined-${id}`,
+        customerId,
+        customerIds: new Set(),
+        customer,
+        supplierAdvanceAccounts: [],
+        supplierAdvanceBalance: 0,
+        supplierAdvanceBalanceMeaning: "",
+        customerAdvanceAccounts: [],
+        customerAdvanceBalance: 0,
+        customerAdvanceBalanceMeaning: "",
+        buyerFinancingAccounts: [],
+        buyerFinancingBalance: 0,
+        buyerFinancingBalanceMeaning: "",
+      };
+      grouped.set(id, combined);
+    }
+    if (customerId) combined.customerIds.add(customerId);
+    if (!combined.customerId && customerId) combined.customerId = customerId;
+
+    if (account.type === "Customer gold advance") {
+      const meaning = String(account.balanceMeaning ?? "");
+      if (meaning.toLocaleLowerCase().includes("supplier owes")) {
+        combined.supplierAdvanceAccounts.push(String(account.accountReference ?? ""));
+        combined.supplierAdvanceBalance += Number(account.balance ?? 0);
+        combined.supplierAdvanceBalanceMeaning = meaning;
+      } else {
+        combined.customerAdvanceAccounts.push(String(account.accountReference ?? ""));
+        combined.customerAdvanceBalance += Number(account.balance ?? 0);
+        combined.customerAdvanceBalanceMeaning = meaning;
+      }
+    } else if (account.type === "Buyer gold financing") {
+      combined.buyerFinancingAccounts.push(String(account.accountReference ?? ""));
+      combined.buyerFinancingBalance += Number(account.balance ?? 0);
+      combined.buyerFinancingBalanceMeaning = String(account.balanceMeaning ?? "");
+    }
+  }
+
+  return [...grouped.values()]
+    .map(({ customerIds, ...account }) => ({
+      ...account,
+      statementCustomerIds: [...customerIds].join("|"),
+      supplierAdvanceAccounts: account.supplierAdvanceAccounts.join(", "),
+      customerAdvanceAccounts: account.customerAdvanceAccounts.join(", "),
+      buyerFinancingAccounts: account.buyerFinancingAccounts.join(", "),
+    }))
+    .sort((left, right) => left.customer.localeCompare(right.customer));
 }
 
 function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[] {
@@ -265,6 +396,36 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
       ...data.buyerFinancingDailySummary.map((row) => [row.date, row.customer, row.stockKg, row.financing, row.balance]),
     ],
   });
+  if (data.financing) {
+    const activity = data.financing;
+    const accounts = combineFinancingAccounts(data.financingAccounts ?? []);
+    const activityHeaders = Object.keys(activity[0] ?? {
+      date: "",
+      type: "",
+      customer: "",
+      accountReference: "",
+      activity: "",
+      reference: "",
+      relatedReference: "",
+      amount: 0,
+    });
+    const accountHeaders = [
+      "customer",
+      "supplierAdvanceAccounts",
+      "supplierAdvanceBalance",
+      "supplierAdvanceBalanceMeaning",
+      "customerAdvanceAccounts",
+      "customerAdvanceBalance",
+      "customerAdvanceBalanceMeaning",
+      "buyerFinancingAccounts",
+      "buyerFinancingBalance",
+      "buyerFinancingBalanceMeaning",
+    ];
+    sheets.push(
+      { name: "Combined financing activity", rows: [activityHeaders, ...activity.map((row) => activityHeaders.map((header) => row[header] ?? null))] },
+      { name: "Combined financing accounts", rows: [accountHeaders, ...accounts.map((row) => accountHeaders.map((header) => row[header] ?? null))] },
+    );
+  }
   return sheets;
 }
 
@@ -284,6 +445,7 @@ export function ReportsDashboard() {
   const [grouping, setGrouping] = useState<ReportGrouping>("day");
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [selectedPaymentAccountId, setSelectedPaymentAccountId] = useState("");
+  const [inventorySearch, setInventorySearch] = useState("");
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -327,32 +489,68 @@ export function ReportsDashboard() {
     setStatementError("");
     setStatementLoading(true);
     try {
-      const endpoint = type === "customer-advances" ? "/api/customer-advances" : "/api/buyer-financing";
-      const [response, customerResponse] = await Promise.all([
-        fetch(`${endpoint}?customerId=${encodeURIComponent(customerId)}`, { cache: "no-store" }),
-        fetch(`/api/customers/${encodeURIComponent(customerId)}`, { cache: "no-store" }),
+      const customerIds = type === "combined-financing"
+        ? customerId.split("|").filter(Boolean)
+        : [customerId];
+      if (!customerIds.length) throw new Error("No customer records were selected for this statement");
+      const endpoints = type === "combined-financing"
+        ? ["/api/customer-advances", "/api/buyer-financing"]
+        : [type === "customer-advances" ? "/api/customer-advances" : "/api/buyer-financing"];
+      const financingRequests = customerIds.flatMap((id) => endpoints.map((endpoint) => ({ id, endpoint })));
+      const responses = await Promise.all([
+        ...financingRequests.map(({ id, endpoint }) => fetch(`${endpoint}?customerId=${encodeURIComponent(id)}`, { cache: "no-store" })),
+        ...customerIds.map((id) => fetch(`/api/customers/${encodeURIComponent(id)}`, { cache: "no-store" })),
       ]);
-      const [body, customerBody]: [unknown, unknown] = await Promise.all([response.json(), customerResponse.json()]);
-      if (!response.ok) {
-        const message = body && typeof body === "object" && "error" in body ? String(body.error) : "Unable to load financing statement";
-        throw new Error(message);
+      const responseBodies: unknown[] = await Promise.all(responses.map((response) => response.json()));
+      for (let index = 0; index < financingRequests.length; index += 1) {
+        if (!responses[index].ok) {
+          const body = responseBodies[index];
+          const message = body && typeof body === "object" && "error" in body ? String(body.error) : "Unable to load financing statement";
+          throw new Error(message);
+        }
       }
-      if (!customerResponse.ok) {
-        const message = customerBody && typeof customerBody === "object" && "error" in customerBody ? String(customerBody.error) : "Unable to load customer contact details";
-        throw new Error(message);
+      const customerResponses = responses.slice(financingRequests.length);
+      const customerBodies = responseBodies.slice(financingRequests.length);
+      for (let index = 0; index < customerResponses.length; index += 1) {
+        if (!customerResponses[index].ok) {
+          const body = customerBodies[index];
+          const message = body && typeof body === "object" && "error" in body ? String(body.error) : "Unable to load customer contact details";
+          throw new Error(message);
+        }
       }
-      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("The server returned an invalid financing statement");
-      if (!customerBody || typeof customerBody !== "object" || Array.isArray(customerBody)) throw new Error("The server returned invalid customer contact details");
-      const customerDetails = customerBody as Record<string, unknown>;
-      const customerPhone = typeof customerDetails.phone === "string" && customerDetails.phone.trim() ? customerDetails.phone : null;
-      const phoneRestricted = !("phone" in customerDetails);
+      const customerDetails = customerBodies.map((body) => {
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("The server returned invalid customer contact details");
+        return body as Record<string, unknown>;
+      });
+      const customerPhones = [...new Set(customerDetails
+        .map((details) => typeof details.phone === "string" ? details.phone.trim() : "")
+        .filter(Boolean))];
+      const customerPhone = customerPhones.length ? customerPhones.join(", ") : null;
+      const phoneRestricted = customerDetails.some((details) => !("phone" in details));
+      const advanceBody = type === "buyer-financing" ? null : { advances: [] as unknown[] };
+      const buyerBody = type === "customer-advances" ? null : { accounts: [] as unknown[] };
+      for (let index = 0; index < financingRequests.length; index += 1) {
+        const body = responseBodies[index];
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("The server returned an invalid financing statement");
+        if (financingRequests[index].endpoint === "/api/customer-advances" && advanceBody) {
+          const advances = (body as { advances?: unknown }).advances;
+          if (!Array.isArray(advances)) throw new Error("No customer advance statement data was returned");
+          advanceBody.advances.push(...advances);
+        } else if (financingRequests[index].endpoint === "/api/buyer-financing" && buyerBody) {
+          const accounts = (body as { accounts?: unknown }).accounts;
+          if (!Array.isArray(accounts)) throw new Error("No buyer financing statement data was returned");
+          buyerBody.accounts.push(...accounts);
+        }
+      }
       const rows: Omit<StatementRow, "balance">[] = [];
-      let totalBalancePesewas = 0;
+      let supplierAdvanceBalancePesewas = 0;
+      let customerAdvanceBalancePesewas = 0;
+      let buyerFinancingBalancePesewas = 0;
       let name = customerName;
-      let code = "";
+      const customerCodes = new Set<string>();
       let customerKind: "BUYER" | "SUPPLIER" = "BUYER";
-      if (type === "customer-advances") {
-        const payload = body as { advances?: Array<{
+      if (advanceBody) {
+        const payload = advanceBody as { advances?: Array<{
           id: string;
           reference: string;
           createdAt: string;
@@ -364,15 +562,20 @@ export function ReportsDashboard() {
           requests: Array<{ reference: string; fulfillments: Array<{ reference: string; createdAt: string; grams: string | number; amount: string | number; pricePerGram: string | number; trade: { reference: string } }> }>;
         }> };
         if (!Array.isArray(payload.advances)) throw new Error("No customer advance statement data was returned");
-        for (const advance of payload.advances.filter((item) => item.customer.id === customerId)) {
+        for (const advance of payload.advances.filter((item) => customerIds.includes(item.customer.id))) {
           name = advance.customer.name;
-          code = advance.customer.code;
+          if (advance.customer.code) customerCodes.add(advance.customer.code);
           customerKind = advance.customer.kind;
-          totalBalancePesewas += Math.round(Number(advance.balance) * 100);
+          if (advance.customer.kind === "SUPPLIER") {
+            supplierAdvanceBalancePesewas += Math.round(Number(advance.balance) * 100);
+          } else {
+            customerAdvanceBalancePesewas += Math.round(Number(advance.balance) * 100);
+          }
           if (Number(advance.openingBalance) !== 0) {
             rows.push({
               id: `${advance.id}-opening-balance`,
               date: advance.createdAt,
+              financingType: advance.customer.kind === "SUPPLIER" ? "Supplier gold advance" : "Customer gold advance",
               account: advance.reference,
               activity: "Opening balance",
               reference: advance.reference,
@@ -384,6 +587,7 @@ export function ReportsDashboard() {
           rows.push(...advance.payments.map((payment) => ({
             id: `${advance.id}-${payment.reference}`,
             date: payment.paidAt,
+            financingType: advance.customer.kind === "SUPPLIER" ? "Supplier gold advance" as const : "Customer gold advance" as const,
             account: advance.reference,
             activity: advance.customer.kind === "SUPPLIER"
               ? payment.direction === "INBOUND" ? "Supplier payment received" : "Supplier overpayment refunded"
@@ -396,6 +600,7 @@ export function ReportsDashboard() {
           rows.push(...advance.requests.flatMap((request) => request.fulfillments.map((fulfillment) => ({
             id: `${advance.id}-${fulfillment.reference}`,
             date: fulfillment.createdAt,
+            financingType: advance.customer.kind === "SUPPLIER" ? "Supplier gold advance" as const : "Customer gold advance" as const,
             account: advance.reference,
             activity: "Gold released",
             reference: fulfillment.reference,
@@ -404,8 +609,9 @@ export function ReportsDashboard() {
             decrease: Number(fulfillment.amount),
           }))));
         }
-      } else {
-        const payload = body as { accounts?: Array<{
+      }
+      if (buyerBody) {
+        const payload = buyerBody as { accounts?: Array<{
           id: string;
           reference: string;
           balance: string | number;
@@ -414,13 +620,14 @@ export function ReportsDashboard() {
           settlements: Array<{ reference: string; amount: string | number; createdAt: string; trade: { reference: string; quantityKg: string | number; purityBps: number } }>;
         }> };
         if (!Array.isArray(payload.accounts)) throw new Error("No buyer financing statement data was returned");
-        for (const account of payload.accounts.filter((item) => item.customer.id === customerId)) {
+        for (const account of payload.accounts.filter((item) => customerIds.includes(item.customer.id))) {
           name = account.customer.name;
-          code = account.customer.code;
-          totalBalancePesewas += Math.round(Number(account.balance) * 100);
+          if (account.customer.code) customerCodes.add(account.customer.code);
+          buyerFinancingBalancePesewas += Math.round(Number(account.balance) * 100);
           rows.push(...account.payments.map((payment) => ({
             id: `${account.id}-${payment.reference}`,
             date: payment.paidAt,
+            financingType: "Buyer gold financing" as const,
             account: account.reference,
             activity: payment.direction === "OUTBOUND" ? "Cash advance paid" : "Cash returned",
             reference: payment.reference,
@@ -431,6 +638,7 @@ export function ReportsDashboard() {
           rows.push(...account.settlements.map((settlement) => ({
             id: `${account.id}-${settlement.reference}`,
             date: settlement.createdAt,
+            financingType: "Buyer gold financing" as const,
             account: account.reference,
             activity: "Gold purchase applied",
             reference: settlement.reference,
@@ -442,12 +650,42 @@ export function ReportsDashboard() {
       }
       rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.id.localeCompare(b.id));
       let balancePesewas = 0;
+      let supplierAdvanceRunningBalancePesewas = 0;
+      let customerAdvanceRunningBalancePesewas = 0;
+      let buyerFinancingRunningBalancePesewas = 0;
       const statementRows = rows.map((row) => {
-        balancePesewas += Math.round(row.increase * 100) - Math.round(row.decrease * 100);
+        const change = Math.round(row.increase * 100) - Math.round(row.decrease * 100);
+        if (type === "combined-financing") {
+          if (row.financingType === "Buyer gold financing") {
+            buyerFinancingRunningBalancePesewas += change;
+            return { ...row, balance: buyerFinancingRunningBalancePesewas / 100 };
+          }
+          if (row.financingType === "Supplier gold advance") {
+            supplierAdvanceRunningBalancePesewas += change;
+            return { ...row, balance: supplierAdvanceRunningBalancePesewas / 100 };
+          }
+          customerAdvanceRunningBalancePesewas += change;
+          return { ...row, balance: customerAdvanceRunningBalancePesewas / 100 };
+        }
+        balancePesewas += change;
         return { ...row, balance: balancePesewas / 100 };
       });
       if (requestId === statementRequestId.current) {
-        setStatement({ type, customerKind, customerName: name, customerCode: code, customerPhone, phoneRestricted, balance: totalBalancePesewas / 100, rows: statementRows });
+        setStatement({
+          type,
+          customerKind,
+          customerName: name,
+          customerCode: [...customerCodes].join(", "),
+          customerPhone,
+          phoneRestricted,
+          balance: type === "combined-financing"
+            ? 0
+            : (supplierAdvanceBalancePesewas + customerAdvanceBalancePesewas + buyerFinancingBalancePesewas) / 100,
+          supplierAdvanceBalance: supplierAdvanceBalancePesewas / 100,
+          customerAdvanceBalance: customerAdvanceBalancePesewas / 100,
+          buyerFinancingBalance: buyerFinancingBalancePesewas / 100,
+          rows: statementRows,
+        });
       }
     } catch (cause) {
       if (requestId === statementRequestId.current) {
@@ -517,13 +755,24 @@ export function ReportsDashboard() {
       value: row.value,
     }));
   }, [data?.inventory]);
+  const filteredInventory = useMemo(() => {
+    const query = inventorySearch.trim().toLocaleLowerCase();
+    if (!query) return data?.inventory ?? [];
+    return (data?.inventory ?? []).filter((lot) => [
+      lot.customer,
+      lot.source,
+      lot.batchNumber,
+      lot.location,
+      lot.status,
+    ].some((value) => String(value ?? "").toLocaleLowerCase().includes(query)));
+  }, [data?.inventory, inventorySearch]);
 
   const visibleTabs = tabs.filter((tab) => {
     if (tab.id === "inventory" || tab.id === "movements") return data?.inventory !== null;
     if (tab.id === "payments") return data?.payments !== null;
     if (tab.id === "expenses") return data?.expenses !== null;
     if (tab.id === "payment-methods") return data?.payments !== null && data?.paymentAccounts !== null;
-    if (tab.id === "customer-advances" || tab.id === "buyer-financing") return data?.financing !== null;
+    if (tab.id === "customer-advances" || tab.id === "buyer-financing" || tab.id === "combined-financing") return data?.financing !== null;
     if (tab.id === "staff") return data?.staffActivity !== null;
     if (tab.id === "board") return data?.boardPrices !== null;
     return true;
@@ -544,6 +793,9 @@ export function ReportsDashboard() {
     { key: "balance", label: "Balance", format: "currency" },
     { key: "createdBy", label: "Recorded by" },
   );
+  const renderFinancingStatement = (customerId: string, customerName: string, statementType: FinancingStatement["type"]) => {
+    void openStatement(customerId, customerName, statementType);
+  };
   const groupedColumns = makeColumns(
     { key: "period", label: "Period" },
     { key: "purchasesKg", label: "Purchased", format: "kg" },
@@ -553,6 +805,7 @@ export function ReportsDashboard() {
   );
   const inventoryColumns = makeColumns(
     { key: "batchNumber", label: "Batch" },
+    { key: "customer", label: "Customer / supplier" },
     { key: "remainingKg", label: "Current stock", format: "kg" },
     { key: "karat", label: "Karat" },
     { key: "purityBps", label: "Purity (bps)" },
@@ -619,20 +872,40 @@ export function ReportsDashboard() {
     reportContent = <>
       <div className="grid gap-3 sm:grid-cols-2"><Metric label="Current stock" value={weight(data.totals.inventoryKg ?? 0)} /><Metric label="Inventory valuation (FIFO book value)" value={currency(data.totals.inventoryValue ?? 0)} /></div>
       <Card><CardHeader><CardTitle>Current stock by karat</CardTitle></CardHeader><CardContent><ReportTable rows={inventoryByKarat} columns={karatColumns} /></CardContent></Card>
-      <Card><CardHeader><CardTitle>Current stock by batch</CardTitle></CardHeader><CardContent><ReportTable rows={data.inventory ?? []} columns={inventoryColumns} /></CardContent></Card>
+      <Card>
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
+          <div><CardTitle>Current stock by batch</CardTitle><p className="mt-1 text-xs text-[#7c8793]">Search customer or supplier name, source, batch, location, or status.</p></div>
+          <input
+            type="search"
+            aria-label="Search current stock by customer or batch"
+            placeholder="Search customer stocks…"
+            value={inventorySearch}
+            onChange={(event) => setInventorySearch(event.target.value)}
+            className="h-10 w-full rounded-lg border border-[#dfe4e9] bg-white px-3 text-sm outline-none transition focus:border-[#bc8c36] focus:ring-4 focus:ring-[#bc8c36]/10 sm:max-w-xs"
+          />
+        </CardHeader>
+        <CardContent><ReportTable rows={filteredInventory} columns={inventoryColumns} emptyMessage={inventorySearch.trim() ? "No current stock matches your search." : "No current stock found."} /></CardContent>
+      </Card>
     </>;
   } else if (data && activeTab === "customers") {
     reportContent = <Card><CardHeader><CardTitle>Customer transaction history</CardTitle><p className="text-xs text-[#7c8793]">Transactions within the selected date range.</p></CardHeader><CardContent><ReportTable rows={data.trades} columns={tradeColumns} /></CardContent></Card>;
-  } else if (data && (activeTab === "customer-advances" || activeTab === "buyer-financing")) {
+  } else if (data && (activeTab === "customer-advances" || activeTab === "buyer-financing" || activeTab === "combined-financing")) {
     const customerAdvances = activeTab === "customer-advances";
+    const combinedFinancing = activeTab === "combined-financing";
     const type = customerAdvances ? "Customer gold advance" : "Buyer gold financing";
-    const financingRows = (data.financing ?? []).filter((row) => row.type === type);
-    const financingAccounts = (data.financingAccounts ?? []).filter((row) => row.type === type);
+    const financingRows = combinedFinancing
+      ? data.financing ?? []
+      : (data.financing ?? []).filter((row) => row.type === type);
+    const financingAccounts = combinedFinancing
+      ? data.financingAccounts ?? []
+      : (data.financingAccounts ?? []).filter((row) => row.type === type);
+    const combinedFinancingAccounts = combineFinancingAccounts(financingAccounts);
     const total = (activity: string) => financingRows
       .filter((row) => row.activity === activity)
       .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
     const financingColumns = makeColumns(
       { key: "date", label: "Date", format: "date" },
+      ...(combinedFinancing ? [{ key: "type", label: "Financing type" }] : []),
       { key: "customer", label: "Customer" },
       { key: "accountReference", label: "Account" },
       { key: "activity", label: "Activity" },
@@ -640,13 +913,19 @@ export function ReportsDashboard() {
       { key: "relatedReference", label: "Linked trade" },
       { key: "amount", label: "Amount", format: "currency" },
     );
-    const financingAccountColumns = makeColumns(
-      { key: "customer", label: "Customer" },
-      { key: "accountReference", label: "Account" },
-      { key: "balance", label: "Current balance", format: "currency" },
-      { key: "balanceMeaning", label: "Balance interpretation" },
-      { key: "statement", label: "Statement" },
-    );
+    const financingAccountColumns = combinedFinancing
+      ? makeColumns(
+        { key: "customer", label: "Customer" },
+        { key: "balances", label: "Balances" },
+        { key: "statement", label: "Statement" },
+      )
+      : makeColumns(
+        { key: "customer", label: "Customer" },
+        { key: "accountReference", label: "Account" },
+        { key: "balance", label: "Current balance", format: "currency" },
+        { key: "balanceMeaning", label: "Balance interpretation" },
+        { key: "statement", label: "Statement" },
+      );
     const dailySupplierColumns = makeColumns(
       { key: "date", label: "Date", format: "day" },
       { key: "stockKg", label: "Stock received", format: "kg" },
@@ -668,7 +947,21 @@ export function ReportsDashboard() {
       { key: "cashReturned", label: "Cash returned", format: "currency" },
       { key: "balanceLeft", label: "Balance left", format: "currency" },
     );
-    reportContent = <>
+    reportContent = combinedFinancing ? <>
+      <p className="rounded-lg border border-[#e8ebef] bg-white px-4 py-3 text-xs leading-5 text-[#637083]">
+        Combined view of supplier gold advances and customer gold financing. Balances remain separate by account type and must be interpreted using each row’s balance meaning; they are not netted together.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Metric label="Supplier advance funds received" value={currency(total("Funds received"))} />
+        <Metric label="Supplier advance refunds" value={currency(total("Refund paid"))} />
+        <Metric label="Gold released against advances" value={currency(total("Gold released"))} />
+        <Metric label="Cash advanced to buyers" value={currency(total("Cash advance paid"))} />
+        <Metric label="Cash returned by buyers" value={currency(total("Cash returned"))} />
+        <Metric label="Gold purchases settled" value={currency(total("Gold purchase settled"))} />
+      </div>
+      <Card><CardHeader><CardTitle>Current financing balances by customer</CardTitle><p className="text-xs text-[#7c8793]">Each customer appears once. Expand balances to see supplier, customer, and buyer-financing positions separately; generate one statement to see their combined transaction history.</p></CardHeader><CardContent><ReportTable rows={combinedFinancingAccounts.map((account) => ({ ...account, type: "combined-financing" }))} columns={financingAccountColumns} emptyMessage="No financing accounts found." onCustomerClick={openCustomer} onStatementClick={renderFinancingStatement} /></CardContent></Card>
+      <Card><CardHeader><CardTitle>Combined financing activity</CardTitle><p className="text-xs text-[#7c8793]">Supplier advance and customer financing activity within the selected date range. Select a customer name to view their details.</p></CardHeader><CardContent><ReportTable rows={financingRows} columns={financingColumns} emptyMessage="No supplier advance or customer financing activity in this date range." onCustomerClick={openCustomer} /></CardContent></Card>
+    </> : <>
       <Card className="financing-summary-print-root">
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3">
           <div className="min-w-0 flex-1 text-left">
@@ -725,7 +1018,7 @@ export function ReportsDashboard() {
           <Metric label="Gold purchases settled" value={currency(total("Gold purchase settled"))} />
         </>}
       </div>
-      <Card><CardHeader><CardTitle>Current balances by customer</CardTitle><p className="text-xs text-[#7c8793]">Balances are current as of report generation; activity below uses the selected date range. Generate a statement for full account history.</p></CardHeader><CardContent><ReportTable rows={financingAccounts} columns={financingAccountColumns} emptyMessage={`No ${customerAdvances ? "supplier gold advance" : "customer gold financing"} accounts found.`} onCustomerClick={openCustomer} onStatementClick={(customerId, customerName) => { void openStatement(customerId, customerName, customerAdvances ? "customer-advances" : "buyer-financing"); }} /></CardContent></Card>
+      <Card><CardHeader><CardTitle>Current balances by customer</CardTitle><p className="text-xs text-[#7c8793]">Balances are current as of report generation; activity below uses the selected date range. Generate a statement for full account history.</p></CardHeader><CardContent><ReportTable rows={financingAccounts} columns={financingAccountColumns} emptyMessage={`No ${customerAdvances ? "supplier gold advance" : "customer gold financing"} accounts found.`} onCustomerClick={openCustomer} onStatementClick={(customerId, customerName) => renderFinancingStatement(customerId, customerName, customerAdvances ? "customer-advances" : "buyer-financing")} /></CardContent></Card>
       <Card><CardHeader><CardTitle>Activity by customer</CardTitle><p className="text-xs text-[#7c8793]">Activity within the selected date range. Select a customer name to view their details.</p></CardHeader><CardContent><ReportTable rows={financingRows} columns={financingColumns} emptyMessage={`No ${customerAdvances ? "supplier gold advance" : "customer gold financing"} activity in this date range.`} onCustomerClick={openCustomer} /></CardContent></Card>
     </>;
   } else if (data && activeTab === "payments") {
@@ -986,7 +1279,7 @@ export function ReportsDashboard() {
             </div>
           </div>
           <div className="text-right">
-            <h2 id="financing-statement-title" className="text-lg font-semibold uppercase tracking-wide text-[#17212f]">{statement.type === "customer-advances" ? "Supplier Gold Advance" : "Customer Gold Financing"} Statement</h2>
+            <h2 id="financing-statement-title" className="text-lg font-semibold uppercase tracking-wide text-[#17212f]">{statement.type === "combined-financing" ? "Combined Financing" : statement.type === "customer-advances" ? "Supplier Gold Advance" : "Customer Gold Financing"} Statement</h2>
             <p className="mt-1 text-xs text-[#637083]">Generated {new Date().toLocaleString("en-GH", { dateStyle: "medium", timeStyle: "short" })}</p>
           </div>
         </header>
@@ -1005,31 +1298,43 @@ export function ReportsDashboard() {
             ? <AlertDialog open title="Financing statement error" description={statementError} onConfirm={() => setStatementError("")} />
             : <>
               <section className="mt-4 rounded-lg border border-[#e7ebef] bg-[#fafbfc] px-4 py-3">
-                <h3 className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">{statement.customerKind === "SUPPLIER" ? "Supplier" : "Customer"}</h3>
+                <h3 className="text-[10px] font-semibold uppercase tracking-wide text-[#89929d]">{statement.type === "combined-financing" ? "Customer records" : statement.customerKind === "SUPPLIER" ? "Supplier" : "Customer"}</h3>
                 <p className="mt-1 text-base font-semibold text-[#17212f]">{statement.customerName}</p>
                 <p className="mt-1 text-sm text-[#495564]">Phone: {statement.phoneRestricted ? "Restricted" : statement.customerPhone ?? "Not on file"}</p>
                 {statement.customerCode && <p className="mt-1 text-xs text-[#637083]">Customer code: {statement.customerCode}</p>}
               </section>
               <div className="mt-4 flex flex-wrap justify-between gap-2 border-y border-[#e7ebef] py-3 text-sm">
-                <p>Current position: <strong>{statement.type === "customer-advances"
+                {statement.type === "combined-financing" ? <>
+                  <p>Supplier advance: <strong>{(statement.supplierAdvanceBalance ?? 0) < 0
+                    ? "Supplier owes Big Joe"
+                    : (statement.supplierAdvanceBalance ?? 0) > 0 ? "Credit owed to supplier" : "Settled"} {currency(Math.abs(statement.supplierAdvanceBalance ?? 0))}</strong></p>
+                  <p>Customer advance: <strong>{(statement.customerAdvanceBalance ?? 0) >= 0
+                    ? "Credit owed to customer"
+                    : "Customer owes Big Joe"} {currency(Math.abs(statement.customerAdvanceBalance ?? 0))}</strong></p>
+                  <p>Buyer financing: <strong>{(statement.buyerFinancingBalance ?? 0) > 0
+                    ? "Customer owes Big Joe"
+                    : (statement.buyerFinancingBalance ?? 0) < 0 ? "Big Joe owes customer" : "Settled"} {currency(Math.abs(statement.buyerFinancingBalance ?? 0))}</strong></p>
+                </> : <p>Current position: <strong>{statement.type === "customer-advances"
                   ? `${statement.customerKind === "SUPPLIER"
                     ? statement.balance < 0 ? "Supplier owes Big Joe" : statement.balance > 0 ? "Credit owed to supplier" : "Settled"
                     : statement.balance >= 0 ? "Credit owed to customer" : "Amount customer owes"} ${currency(Math.abs(statement.balance))}`
-                  : `${statement.balance > 0 ? "Customer owes Big Joe" : statement.balance < 0 ? "Big Joe owes customer" : "Settled"} ${currency(Math.abs(statement.balance))}`}</strong></p>
+                  : `${statement.balance > 0 ? "Customer owes Big Joe" : statement.balance < 0 ? "Big Joe owes customer" : "Settled"} ${currency(Math.abs(statement.balance))}`}</strong></p>}
               </div>
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[900px] text-left text-xs">
-                  <thead><tr className="border-b border-[#dfe4e9] text-[#637083]"><th className="py-2 pr-3">Date</th><th className="py-2 pr-3">Account</th><th className="py-2 pr-3">Activity</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Details</th><th className="py-2 pr-3 text-right">{statement.type === "customer-advances" ? statement.customerKind === "SUPPLIER" ? "Balance increase" : "Credit increase" : "Advance paid"}</th><th className="py-2 pr-3 text-right">{statement.type === "customer-advances" ? statement.customerKind === "SUPPLIER" ? "Balance decrease" : "Applied / refunded" : "Gold / cash received"}</th><th className="py-2 text-right">Balance</th></tr></thead>
-                  <tbody>{statement.rows.map((row) => <tr key={row.id} className="border-b border-[#edf0f3] align-top"><td className="whitespace-nowrap py-2 pr-3">{date(row.date)}</td><td className="py-2 pr-3">{row.account}</td><td className="py-2 pr-3">{row.activity}</td><td className="py-2 pr-3">{row.reference}</td><td className="py-2 pr-3">{row.details || "—"}</td><td className="whitespace-nowrap py-2 pr-3 text-right">{row.increase ? currency(row.increase) : "—"}</td><td className="whitespace-nowrap py-2 pr-3 text-right">{row.decrease ? currency(row.decrease) : "—"}</td><td className="whitespace-nowrap py-2 text-right font-semibold">{currency(row.balance)}</td></tr>)}
-                    {!statement.rows.length && <tr><td colSpan={8} className="py-6 text-center text-[#89929d]">No account activity to include in this statement.</td></tr>}
+                  <thead><tr className="border-b border-[#dfe4e9] text-[#637083]">{statement.type === "combined-financing" && <th className="py-2 pr-3">Financing type</th>}<th className="py-2 pr-3">Date</th><th className="py-2 pr-3">Account</th><th className="py-2 pr-3">Activity</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Details</th><th className="py-2 pr-3 text-right">{statement.type === "combined-financing" ? "Increase" : statement.type === "customer-advances" ? statement.customerKind === "SUPPLIER" ? "Balance increase" : "Credit increase" : "Advance paid"}</th><th className="py-2 pr-3 text-right">{statement.type === "combined-financing" ? "Decrease" : statement.type === "customer-advances" ? statement.customerKind === "SUPPLIER" ? "Balance decrease" : "Applied / refunded" : "Gold / cash received"}</th><th className="py-2 text-right">Balance</th></tr></thead>
+                  <tbody>{statement.rows.map((row) => <tr key={row.id} className="border-b border-[#edf0f3] align-top">{statement.type === "combined-financing" && <td className="whitespace-nowrap py-2 pr-3">{row.financingType}</td>}<td className="whitespace-nowrap py-2 pr-3">{date(row.date)}</td><td className="py-2 pr-3">{row.account}</td><td className="py-2 pr-3">{row.activity}</td><td className="py-2 pr-3">{row.reference}</td><td className="py-2 pr-3">{row.details || "—"}</td><td className="whitespace-nowrap py-2 pr-3 text-right">{row.increase ? currency(row.increase) : "—"}</td><td className="whitespace-nowrap py-2 pr-3 text-right">{row.decrease ? currency(row.decrease) : "—"}</td><td className="whitespace-nowrap py-2 text-right font-semibold">{currency(row.balance)}</td></tr>)}
+                    {!statement.rows.length && <tr><td colSpan={statement.type === "combined-financing" ? 9 : 8} className="py-6 text-center text-[#89929d]">No account activity to include in this statement.</td></tr>}
                   </tbody>
                 </table>
               </div>
-              <p className="mt-3 text-xs text-[#637083]">{statement.type === "customer-advances"
-                ? statement.customerKind === "SUPPLIER"
-                  ? "A negative balance means the supplier owes Big Joe Gold; a positive balance is credit owed to the supplier."
-                  : "A positive balance is cash credit owed to the customer; a negative balance means the customer owes Big Joe Gold."
-                : "A positive balance means the customer owes Big Joe; a negative balance means Big Joe owes the customer."}</p>
+              <p className="mt-3 text-xs text-[#637083]">{statement.type === "combined-financing"
+                ? "The running balance resets by account category. Supplier advances, customer advances, and buyer financing balances are shown separately and are not netted."
+                : statement.type === "customer-advances"
+                  ? statement.customerKind === "SUPPLIER"
+                    ? "A negative balance means the supplier owes Big Joe Gold; a positive balance is credit owed to the supplier."
+                    : "A positive balance is cash credit owed to the customer; a negative balance means the customer owes Big Joe Gold."
+                  : "A positive balance means the customer owes Big Joe; a negative balance means Big Joe owes the customer."}</p>
             </>}
       </section>
     </div>}
