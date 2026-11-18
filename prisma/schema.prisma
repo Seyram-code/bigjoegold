@@ -160,6 +160,7 @@ model User {
   manualMomoEntries       ManualMomoEntry[]
   manualMomoContacts      ManualMomoContact[]
   auditLogs               AuditLog[]
+  idempotencyRecords      IdempotencyRecord[]
 }
 
 model Role {
@@ -254,6 +255,23 @@ model ApiRequestRateLimit {
   windowStartedAt DateTime @db.DateTime(3)
 
   @@index([windowStartedAt])
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  route       String   @db.VarChar(120)
+  key         String   @db.VarChar(128)
+  requestHash String   @db.Char(64)
+  state       String   @default("PENDING") @db.VarChar(16)
+  statusCode  Int?
+  response    Json?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@unique([userId, route, key])
+  @@index([createdAt])
 }
 
 model Customer {

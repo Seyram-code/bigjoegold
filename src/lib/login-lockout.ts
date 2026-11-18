@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { scheduleRateLimitCleanup } from "@/lib/rate-limit";
 import { loginLockoutRemainingSeconds, nextLoginFailure } from "@/lib/login-lockout-policy";
 
 function bucketKey(identifier: string) {
@@ -11,6 +12,7 @@ function bucketKey(identifier: string) {
 }
 
 export async function getLoginLock(identifier: string) {
+  scheduleRateLimitCleanup();
   const key = bucketKey(identifier);
   const [bucket] = await prisma.$queryRaw<Array<{ count: number; windowStartedAt: Date }>>(Prisma.sql`
     SELECT \`count\`, \`windowStartedAt\`
@@ -23,6 +25,7 @@ export async function getLoginLock(identifier: string) {
 }
 
 export async function recordLoginFailure(identifier: string) {
+  scheduleRateLimitCleanup();
   const key = bucketKey(identifier);
   const now = new Date();
   const count = await prisma.$transaction(async (tx) => {

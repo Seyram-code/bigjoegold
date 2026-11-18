@@ -4,16 +4,21 @@
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
-    "prebuild": "node scripts/hostinger-prebuild.mjs",
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:release": "npm run db:deploy && npm run db:seed"
+  },
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

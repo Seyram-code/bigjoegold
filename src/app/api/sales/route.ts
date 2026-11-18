@@ -8,6 +8,7 @@ import { saleSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { saleConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
 import { sendOwnerTransactionEmail } from "@/lib/email";
+import { runIdempotent } from "@/lib/idempotency";
 
 export async function GET(request: Request) {
   try {
@@ -98,8 +99,11 @@ export async function POST(request: Request) {
     const user = await requireUser("sales:write");
     await enforceUserRateLimit(user.id, "sale-post", { limit: 20 });
     const input = saleSchema.parse(await readJson(request));
-    const sale = await postSale(user, input);
-    after(async () => {
+    const outcome = await runIdempotent(request, user.id, "sales:create", input, async () => ({
+      value: await postSale(user, input), status: 201,
+    }));
+    const sale = outcome.value;
+    if (!outcome.replayed) after(async () => {
       for (const payment of sale.payments) {
         await sendOwnerPaymentSms(payment.id, user.name);
       }
@@ -121,7 +125,7 @@ export async function POST(request: Request) {
         recordedBy: user.name,
       });
     });
-    return Response.json(sale, { status: 201 });
+    return Response.json(sale, { status: outcome.status });
   } catch (error) {
     return apiError(error);
   }

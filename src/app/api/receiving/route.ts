@@ -8,6 +8,7 @@ import { receivingBatchSchema, receivingSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { purchaseConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
 import { sendOwnerTransactionEmail } from "@/lib/email";
+import { runIdempotent } from "@/lib/idempotency";
 
 type PurchaseNotificationRecord = {
   id: string;
@@ -108,17 +109,21 @@ export async function POST(request: Request) {
       if (input.financingAccountId && !userCan(user, "payments:write")) {
         throw new Response("You do not have permission to apply buyer financing", { status: 403 });
       }
-      const trades = await prepareReceivingBatchForSave(user.id, input);
-      schedulePurchaseNotifications(trades, user.name);
-      return Response.json(trades, { status: 201 });
+      const outcome = await runIdempotent(request, user.id, "receiving:batch", input, async () => ({
+        value: await prepareReceivingBatchForSave(user.id, input), status: 201,
+      }));
+      if (!outcome.replayed) schedulePurchaseNotifications(outcome.value, user.name);
+      return Response.json(outcome.value, { status: outcome.status });
     }
     const input = receivingSchema.parse(body);
     if (input.financingAccountId && !userCan(user, "payments:write")) {
       throw new Response("You do not have permission to apply buyer financing", { status: 403 });
     }
-    const trade = await prepareReceivingForSave(user.id, input);
-    if (trade.status === "POSTED") schedulePurchaseNotifications([trade], user.name);
-    return Response.json(trade, { status: 201 });
+    const outcome = await runIdempotent(request, user.id, "receiving:create", input, async () => ({
+      value: await prepareReceivingForSave(user.id, input), status: 201,
+    }));
+    if (!outcome.replayed && outcome.value.status === "POSTED") schedulePurchaseNotifications([outcome.value], user.name);
+    return Response.json(outcome.value, { status: outcome.status });
   } catch (error) {
     return apiError(error);
   }

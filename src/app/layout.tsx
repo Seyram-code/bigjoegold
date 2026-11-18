@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { ToastProvider } from "@/components/ui/toast-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { IdempotencyProvider } from "@/components/idempotency-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -29,7 +30,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body className="min-h-full">
-        <ThemeProvider initialTheme={initialTheme}><ToastProvider>{children}</ToastProvider></ThemeProvider>
+        <IdempotencyProvider><ThemeProvider initialTheme={initialTheme}><ToastProvider>{children}</ToastProvider></ThemeProvider></IdempotencyProvider>
       </body>
     </html>
   );

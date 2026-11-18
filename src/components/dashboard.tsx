@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, BarChart3, CalendarDays,
@@ -98,6 +99,7 @@ export function Dashboard({
   canWriteInventory: boolean;
   canReadReports: boolean;
 }) {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -109,7 +111,7 @@ export function Dashboard({
       const params = new URLSearchParams({ from: selectedFrom, to: selectedTo });
       const response = await fetch(`/api/dashboard?${params}`, { cache: "no-store" });
       if (response.status === 401 || response.status === 403) {
-        window.location.assign("/login");
+        router.push("/login");
         return;
       }
       const body = await response.json();
@@ -121,7 +123,7 @@ export function Dashboard({
     } finally {
       setLoading(false);
     }
-  }, [selectedFrom, selectedTo]);
+  }, [router, selectedFrom, selectedTo]);
 
   const applyDateRange = useCallback((from: string, to: string) => {
     setLoading(true);

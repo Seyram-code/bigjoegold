@@ -2,11 +2,30 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { HttpError } from "@/lib/http";
 
+const RETENTION_DAYS = 14;
+let cleanupScheduled = false;
+
+export function scheduleRateLimitCleanup() {
+  if (cleanupScheduled) return;
+  cleanupScheduled = true;
+  queueMicrotask(async () => {
+    try {
+      const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
+      await prisma.apiRequestRateLimit.deleteMany({ where: { windowStartedAt: { lt: cutoff } } });
+    } catch (error) {
+      console.error("Unable to remove expired rate-limit buckets", error);
+    } finally {
+      cleanupScheduled = false;
+    }
+  });
+}
+
 export async function enforceUserRateLimit(
   userId: string,
   route: string,
   { limit = 30, windowSeconds = 60 }: { limit?: number; windowSeconds?: number } = {},
 ) {
+  scheduleRateLimitCleanup();
   const key = `${route}:${userId}`;
   const now = new Date();
   await prisma.$executeRaw(Prisma.sql`

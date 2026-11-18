@@ -9,6 +9,7 @@ import { calculateCustomerAdvanceBalance } from "@/lib/customer-advance-balance"
 import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateNetProfit, calculateProfitMetrics } from "@/lib/reporting";
 
 const zero = () => new Prisma.Decimal(0);
+const MAX_REPORT_RANGE_DAYS = 366;
 
 function parseDateRange(request: Request) {
   const search = new URL(request.url).searchParams;
@@ -25,6 +26,9 @@ function parseDateRange(request: Request) {
     throw new HttpError("Provide a valid date range", 400);
   }
   if (toValue && /^\d{4}-\d{2}-\d{2}$/.test(toValue)) to.setUTCHours(23, 59, 59, 999);
+  if (to.getTime() - from.getTime() > MAX_REPORT_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+    throw new HttpError("Reports can cover at most 366 days at a time. Select a shorter date range.", 400);
+  }
   return { from, to };
 }
 

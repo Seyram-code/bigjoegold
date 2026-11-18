@@ -9,6 +9,7 @@ import { recordPaymentMovement } from "@/lib/finance";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerPaymentSms } from "@/lib/sms";
 import { sendOwnerTransactionEmail } from "@/lib/email";
+import { runIdempotent } from "@/lib/idempotency";
 
 export async function GET() {
   try {
@@ -35,7 +36,8 @@ export async function POST(request: Request) {
     await enforceUserRateLimit(user.id, "payment-write", { limit: 20 });
     const input = paymentSchema.parse(await readJson(request));
     if (!input.cashAccountId) throw new HttpError("Select the cash or bank account used for this payment", 400);
-    const payment = await prisma.$transaction(async (tx) => {
+    const outcome = await runIdempotent(request, user.id, "payments:create", input, async () => {
+      const payment = await prisma.$transaction(async (tx) => {
       let customerId = input.customerId || null;
       if (input.tradeId) {
         await tx.$queryRaw`SELECT id FROM Trade WHERE id = ${input.tradeId} FOR UPDATE`;
@@ -88,9 +90,12 @@ export async function POST(request: Request) {
         createdById: user.id,
       });
       await addAudit(tx, { userId: user.id, action: "payment.recorded", entity: "Payment", entityId: created.id, details: { reference: created.reference, amount: input.amount, direction: input.direction } });
-      return created;
+        return created;
+      });
+      return { value: payment, status: 201 };
     });
-    after(async () => {
+    const payment = outcome.value;
+    if (!outcome.replayed) after(async () => {
       await sendOwnerPaymentSms(payment.id, user.name);
       try {
         const paymentDetails = await prisma.payment.findUniqueOrThrow({
@@ -114,7 +119,7 @@ export async function POST(request: Request) {
         console.error("Payment was recorded, but its owner email notification could not be prepared.", error);
       }
     });
-    return Response.json(payment, { status: 201 });
+    return Response.json(payment, { status: outcome.status });
   } catch (error) {
     return apiError(error);
   }

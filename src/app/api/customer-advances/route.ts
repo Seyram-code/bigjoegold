@@ -10,6 +10,7 @@ import { customerAdvanceSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerTransactionEmail } from "@/lib/email";
 import { saleConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
+import { runIdempotent } from "@/lib/idempotency";
 
 export async function GET(request: Request) {
   try {
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
     const user = await requireUser("payments:write");
     await enforceUserRateLimit(user.id, "customer-advance-write", { limit: 20 });
     const input = customerAdvanceSchema.parse(await readJson(request));
+    const outcome = await runIdempotent<unknown>(request, user.id, "customer-advances:write", input, async () => {
     if (input.action === "FULFILL") {
       if (!userCan(user, "sales:write")) throw new Response("You do not have permission to fulfill gold requests", { status: 403 });
       const totalGrams = input.allocations.reduce((sum, allocation) => sum.plus(allocation.grams), new Prisma.Decimal(0));
@@ -122,7 +124,7 @@ export async function POST(request: Request) {
           recordedBy: user.name,
         });
       });
-      return Response.json(sale, { status: 201 });
+      return { value: sale, status: 201 };
     }
     const result = await recordCustomerAdvance(user.id, input);
     const paymentId = input.action === "CREATE_ADVANCE"
@@ -160,7 +162,9 @@ export async function POST(request: Request) {
         }
       });
     }
-    return Response.json(result, { status: input.action === "CREATE_ADVANCE" || input.action === "CREATE_REQUEST" ? 201 : 200 });
+    return { value: result, status: input.action === "CREATE_ADVANCE" || input.action === "CREATE_REQUEST" ? 201 : 200 };
+    });
+    return Response.json(outcome.value, { status: outcome.status });
   } catch (error) {
     return apiError(error);
   }

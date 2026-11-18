@@ -4,6 +4,7 @@ import { apiError, HttpError, readJson } from "@/lib/http";
 import { addAudit, reference } from "@/lib/records";
 import { prisma } from "@/lib/prisma";
 import { expenseSchema } from "@/lib/validation";
+import { runIdempotent } from "@/lib/idempotency";
 
 function parseDateRange(url: URL) {
   const now = new Date();
@@ -61,9 +62,10 @@ export async function POST(request: Request) {
   try {
     const user = await requireUser("finance:manage");
     const input = expenseSchema.parse(await readJson(request));
-    const amount = new Prisma.Decimal(input.amount);
-    const movementDate = new Date(input.movementDate);
-    const expense = await prisma.$transaction(async (tx) => {
+    const outcome = await runIdempotent(request, user.id, "expenses:create", input, async () => {
+      const amount = new Prisma.Decimal(input.amount);
+      const movementDate = new Date(input.movementDate);
+      const expense = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM CashAccount WHERE id = ${input.accountId} FOR UPDATE`;
       const account = await tx.cashAccount.findUnique({ where: { id: input.accountId } });
       if (!account || !account.isActive) throw new HttpError("Select an active cash or bank account", 400);
@@ -100,10 +102,11 @@ export async function POST(request: Request) {
           approvalStatus: created.approvalStatus,
         },
       });
-      return created;
+        return created;
+      });
+      return { value: expense, status: 201 };
     });
-
-    return Response.json(expense, { status: 201 });
+    return Response.json(outcome.value, { status: outcome.status });
   } catch (error) {
     return apiError(error);
   }

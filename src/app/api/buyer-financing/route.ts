@@ -8,6 +8,7 @@ import { calculateBuyerFinanceBalance, recordBuyerFinanceTransaction } from "@/l
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { sendOwnerTransactionEmail } from "@/lib/email";
 import { sendOwnerPaymentSms } from "@/lib/sms";
+import { runIdempotent } from "@/lib/idempotency";
 
 export async function GET(request: Request) {
   try {
@@ -54,8 +55,11 @@ export async function POST(request: Request) {
     const user = await requireUser("payments:write");
     await enforceUserRateLimit(user.id, "buyer-finance-write", { limit: 20 });
     const input = buyerFinanceSchema.parse(await readJson(request));
-    const result = await recordBuyerFinanceTransaction(user.id, input);
-    after(async () => {
+    const outcome = await runIdempotent(request, user.id, "buyer-financing:create", input, async () => ({
+      value: await recordBuyerFinanceTransaction(user.id, input), status: 201,
+    }));
+    const result = outcome.value;
+    if (!outcome.replayed) after(async () => {
       await sendOwnerPaymentSms(result.paymentId, user.name);
       try {
         const payment = await prisma.payment.findUniqueOrThrow({
@@ -79,7 +83,7 @@ export async function POST(request: Request) {
         console.error("Buyer financing payment was saved, but its owner email notification could not be prepared.", error);
       }
     });
-    return Response.json(result, { status: 201 });
+    return Response.json(result, { status: outcome.status });
   } catch (error) {
     return apiError(error);
   }

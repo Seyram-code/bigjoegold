@@ -5,6 +5,7 @@ import { apiError, HttpError, readJson } from "@/lib/http";
 import { addAudit, reference } from "@/lib/records";
 import { prisma } from "@/lib/prisma";
 import { financeMovementSchema } from "@/lib/validation";
+import { runIdempotent } from "@/lib/idempotency";
 
 export async function GET() {
   try {
@@ -35,7 +36,8 @@ export async function POST(request: Request) {
   try {
     const user = await requireUser("finance:manage");
     const input = financeMovementSchema.parse(await readJson(request));
-    const created = await prisma.$transaction(async (tx) => {
+    const outcome = await runIdempotent(request, user.id, "finance-movements:create", input, async () => {
+      const created = await prisma.$transaction(async (tx) => {
       if (input.action === "TRANSFER") {
         if (input.fromAccountId === input.toAccountId) throw new HttpError("Choose two different accounts", 400);
         await tx.$queryRaw`SELECT id FROM CashAccount WHERE id IN (${Prisma.join([input.fromAccountId, input.toAccountId].sort())}) ORDER BY id FOR UPDATE`;
@@ -120,9 +122,11 @@ export async function POST(request: Request) {
         entityId: movement.id,
         details: { reference: movement.reference, account: account.name, amount: amount.toString(), direction: input.direction, approvalStatus: movement.approvalStatus },
       });
-      return [movement];
+        return [movement];
+      });
+      return { value: created, status: 201 };
     });
-    return Response.json(created, { status: 201 });
+    return Response.json(outcome.value, { status: outcome.status });
   } catch (error) {
     return apiError(error);
   }
