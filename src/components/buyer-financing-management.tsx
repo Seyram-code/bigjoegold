@@ -13,7 +13,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { CustomerAutocomplete } from "@/components/ui/customer-autocomplete";
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
-import { formatCurrency } from "@/lib/formatters";
+import { formatCurrency, formatTwoDecimalTruncated } from "@/lib/formatters";
 import { fetchAllCustomers } from "@/lib/customer-client";
 
 type Customer = { id: string; name: string; code: string; kind: "BUYER" };
@@ -277,7 +277,7 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
               {repayableAccounts.map((account) => <option key={account.id} value={account.id}>{account.customer.name} · Owes {formatCurrency(account.balance)}</option>)}
             </select>
           </FormField>
-          <FormField label="Amount received (GHS)" htmlFor="buyer-finance-repayment-amount"><GhanaAmountInput id="buyer-finance-repayment-amount" required min="0.01" max={repaymentAccount ? Number(repaymentAccount.balance).toFixed(2) : undefined} step="0.01" value={repaymentAmount} onChange={setRepaymentAmount} className={fieldControlClass} /></FormField>
+          <FormField label="Amount received (GHS)" htmlFor="buyer-finance-repayment-amount"><GhanaAmountInput id="buyer-finance-repayment-amount" required min="0.01" max={repaymentAccount ? formatTwoDecimalTruncated(repaymentAccount.balance) : undefined} step="0.01" value={repaymentAmount} onChange={setRepaymentAmount} className={fieldControlClass} /></FormField>
           <FormField label="Received into account" htmlFor="buyer-finance-repayment-account"><select id="buyer-finance-repayment-account" required value={repaymentCashAccountId} onChange={(event) => setRepaymentCashAccountId(event.target.value)} className={fieldControlClass}><option value="">Select an account</option>{cashAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></FormField>
           <FormField label="Payment method" htmlFor="buyer-finance-repayment-method"><select id="buyer-finance-repayment-method" value={repaymentMethod} onChange={(event) => setRepaymentMethod(event.target.value as (typeof methods)[number])} className={fieldControlClass}>{methods.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></FormField>
           <FormField label="Date received" htmlFor="buyer-finance-repayment-date"><CalendarPicker id="buyer-finance-repayment-date" includeTime max={localDateTime()} value={repaymentPaidAt} onChange={setRepaymentPaidAt} /></FormField>

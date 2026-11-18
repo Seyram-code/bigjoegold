@@ -387,6 +387,34 @@ export const receivingSchema = z.object({
   });
 export type ReceivingInput = z.infer<typeof receivingSchema>;
 
+export const receivingBatchSchema = z.object({
+    action: z.literal("COMPLETE"),
+    customerId: z.string().trim().min(1).max(191),
+    transactionDate: pastOrPresentDateTime("Purchase date"),
+    cashAccountId: z.string().trim().optional().or(z.literal("")),
+    amountPaid: receivingPayment.default("0"),
+    financingAccountId: z.string().trim().max(191).optional().or(z.literal("")),
+    paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHEQUE", "OTHER"]).default("CASH"),
+    storageLocation: inventoryLocation.default("Main storage"),
+    note: optionalText,
+    supportingDocumentRef: z.string().trim().max(1000).optional().or(z.literal("")),
+    items: z.array(z.object({
+      topGrams: receivingWeightGrams,
+      downGrams: receivingWeightGrams,
+      boardPriceId: z.string().trim().min(1).max(191),
+      batchNumber: z.string().trim().max(120).optional().or(z.literal("")),
+    }).strict()).min(2).max(50),
+}).strict()
+    .refine((data) => Number(data.amountPaid) === 0 || Boolean(data.cashAccountId), {
+      message: "Select the account used for the initial payment",
+      path: ["cashAccountId"],
+    })
+    .refine((data) => !data.financingAccountId || Number(data.amountPaid) === 0, {
+      message: "Do not enter a cash payment when applying buyer financing",
+      path: ["amountPaid"],
+    });
+export type ReceivingBatchInput = z.infer<typeof receivingBatchSchema>;
+
 export const paymentSchema = z.object({
   tradeId: z.string().trim().optional().or(z.literal("")),
   customerId: z.string().trim().optional().or(z.literal("")),

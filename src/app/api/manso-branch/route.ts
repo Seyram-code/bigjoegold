@@ -135,7 +135,7 @@ export async function GET() {
       account: { id: branchAccount.id, name: branchAccount.name, balance: (balances.get(branchAccount.id) ?? zero()).toFixed(2) },
       availableBalance: (balances.get(branchAccount.id) ?? zero()).minus(pendingAmount).toFixed(2),
       goldTotals: {
-        quantityKg: (goldTotals._sum.quantityKg ?? zero()).toFixed(3),
+        quantityKg: (goldTotals._sum.quantityKg ?? zero()).toFixed(2, Prisma.Decimal.ROUND_DOWN),
         value: (goldTotals._sum.totalAmount ?? zero()).toFixed(2),
       },
       accounts,

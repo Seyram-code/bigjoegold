@@ -11,7 +11,7 @@ import { formatCurrency, formatWeight } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { downloadExcelWorkbook, type ExcelSheet } from "@/lib/excel-export";
-import { groupTradeTotals, type ReportGrouping } from "@/lib/reporting";
+import { calculateCombinedFinancingNetBalance, groupTradeTotals, type ReportGrouping } from "@/lib/reporting";
 
 type ReportRow = Record<string, string | number | boolean | null>;
 type PaymentRow = ReportRow & {
@@ -45,6 +45,7 @@ type FinancingStatement = {
   supplierAdvanceBalance?: number;
   customerAdvanceBalance?: number;
   buyerFinancingBalance?: number;
+  netBalance?: number;
   rows: StatementRow[];
 };
 type ReportData = {
@@ -137,7 +138,7 @@ function displayValue(value: unknown, format?: Column["format"]) {
 }
 
 function combinedBalanceRows(row: ReportRow) {
-  return [
+  const balances = [
     {
       type: "Supplier advance",
       accounts: row.supplierAdvanceAccounts,
@@ -157,6 +158,20 @@ function combinedBalanceRows(row: ReportRow) {
       meaning: row.buyerFinancingBalanceMeaning,
     },
   ].filter((balance) => typeof balance.accounts === "string" && balance.accounts.length > 0);
+  const netBalance = calculateCombinedFinancingNetBalance(
+    Number(row.supplierAdvanceBalance ?? 0),
+    Number(row.customerAdvanceBalance ?? 0),
+    Number(row.buyerFinancingBalance ?? 0),
+  );
+  balances.push({
+    type: "Net position",
+    accounts: "—",
+    balance: netBalance,
+    meaning: netBalance > 0
+      ? "Big Joe owes supplier"
+      : netBalance < 0 ? "Supplier owes Big Joe" : "Settled",
+  });
+  return balances;
 }
 
 function ReportTable({ rows, columns, emptyMessage, onCustomerClick, onStatementClick }: {
@@ -188,12 +203,21 @@ function ReportTable({ rows, columns, emptyMessage, onCustomerClick, onStatement
                     <tbody className="divide-y divide-[#edf0f2]">{combinedBalanceRows(row).map((balance) => <tr key={balance.type}>
                       <td className="px-2 py-1.5">{balance.type}</td>
                       <td className="px-2 py-1.5">{text(balance.accounts)}</td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-right">{currency(balance.balance)}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right">{currency(balance.type === "Net position"
+                        ? Math.abs(Number(balance.balance ?? 0))
+                        : Number(balance.balance ?? 0))}</td>
                       <td className="px-2 py-1.5">{text(balance.meaning)}</td>
                     </tr>)}</tbody>
                   </table>
                 </div>
               </details>
+              : column.key === "netPosition" && row.type === "combined-financing"
+              ? <span className="font-medium">
+                {Number(row.netBalance ?? 0) > 0
+                  ? "Big Joe owes supplier"
+                  : Number(row.netBalance ?? 0) < 0 ? "Supplier owes Big Joe" : "Settled"}
+                {" · "}{currency(Math.abs(Number(row.netBalance ?? 0)))}
+              </span>
               : column.key === "statement" && typeof row.customerId === "string" && onStatementClick
               ? <Button type="button" variant="outline" size="sm" onClick={() => onStatementClick(
                 row.type === "combined-financing" && typeof row.statementCustomerIds === "string"
@@ -237,6 +261,7 @@ function combineFinancingAccounts(accounts: ReportRow[]): ReportRow[] {
     buyerFinancingAccounts: string[];
     buyerFinancingBalance: number;
     buyerFinancingBalanceMeaning: string;
+    netBalance: number;
   }>();
 
   for (const account of accounts) {
@@ -262,6 +287,7 @@ function combineFinancingAccounts(accounts: ReportRow[]): ReportRow[] {
         buyerFinancingAccounts: [],
         buyerFinancingBalance: 0,
         buyerFinancingBalanceMeaning: "",
+        netBalance: 0,
       };
       grouped.set(id, combined);
     }
@@ -287,13 +313,24 @@ function combineFinancingAccounts(accounts: ReportRow[]): ReportRow[] {
   }
 
   return [...grouped.values()]
-    .map(({ customerIds, ...account }) => ({
-      ...account,
-      statementCustomerIds: [...customerIds].join("|"),
-      supplierAdvanceAccounts: account.supplierAdvanceAccounts.join(", "),
-      customerAdvanceAccounts: account.customerAdvanceAccounts.join(", "),
-      buyerFinancingAccounts: account.buyerFinancingAccounts.join(", "),
-    }))
+    .map(({ customerIds, ...account }) => {
+      const netBalance = calculateCombinedFinancingNetBalance(
+        account.supplierAdvanceBalance,
+        account.customerAdvanceBalance,
+        account.buyerFinancingBalance,
+      );
+      return {
+        ...account,
+        netBalance,
+        netBalanceMeaning: netBalance > 0
+          ? "Big Joe owes supplier"
+          : netBalance < 0 ? "Supplier owes Big Joe" : "Settled",
+        statementCustomerIds: [...customerIds].join("|"),
+        supplierAdvanceAccounts: account.supplierAdvanceAccounts.join(", "),
+        customerAdvanceAccounts: account.customerAdvanceAccounts.join(", "),
+        buyerFinancingAccounts: account.buyerFinancingAccounts.join(", "),
+      };
+    })
     .sort((left, right) => left.customer.localeCompare(right.customer));
 }
 
@@ -420,6 +457,8 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
       "buyerFinancingAccounts",
       "buyerFinancingBalance",
       "buyerFinancingBalanceMeaning",
+      "netBalance",
+      "netBalanceMeaning",
     ];
     sheets.push(
       { name: "Combined financing activity", rows: [activityHeaders, ...activity.map((row) => activityHeaders.map((header) => row[header] ?? null))] },
@@ -642,7 +681,7 @@ export function ReportsDashboard() {
             account: account.reference,
             activity: "Gold purchase applied",
             reference: settlement.reference,
-            details: `${(Number(settlement.trade.quantityKg) * 1000).toLocaleString("en-GH", { maximumFractionDigits: 2 })} g · ${settlement.trade.purityBps / 100}% purity · Trade ${settlement.trade.reference}`,
+            details: `${formatWeight(Number(settlement.trade.quantityKg) * 1000, "g", 2)} · ${formatDecimalTruncated(settlement.trade.purityBps / 100, 2)}% purity · Trade ${settlement.trade.reference}`,
             increase: 0,
             decrease: Number(settlement.amount),
           })));
@@ -684,6 +723,11 @@ export function ReportsDashboard() {
           supplierAdvanceBalance: supplierAdvanceBalancePesewas / 100,
           customerAdvanceBalance: customerAdvanceBalancePesewas / 100,
           buyerFinancingBalance: buyerFinancingBalancePesewas / 100,
+          netBalance: calculateCombinedFinancingNetBalance(
+            supplierAdvanceBalancePesewas / 100,
+            customerAdvanceBalancePesewas / 100,
+            buyerFinancingBalancePesewas / 100,
+          ),
           rows: statementRows,
         });
       }
@@ -917,6 +961,7 @@ export function ReportsDashboard() {
       ? makeColumns(
         { key: "customer", label: "Customer" },
         { key: "balances", label: "Balances" },
+        { key: "netPosition", label: "Net position" },
         { key: "statement", label: "Statement" },
       )
       : makeColumns(
@@ -949,7 +994,7 @@ export function ReportsDashboard() {
     );
     reportContent = combinedFinancing ? <>
       <p className="rounded-lg border border-[#e8ebef] bg-white px-4 py-3 text-xs leading-5 text-[#637083]">
-        Combined view of supplier gold advances and customer gold financing. Balances remain separate by account type and must be interpreted using each row’s balance meaning; they are not netted together.
+        The net position adds supplier advance and customer advance balances, then subtracts buyer financing. Positive means Big Joe owes the customer/supplier; negative means they owe Big Joe.
       </p>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Metric label="Supplier advance funds received" value={currency(total("Funds received"))} />
@@ -959,7 +1004,7 @@ export function ReportsDashboard() {
         <Metric label="Cash returned by buyers" value={currency(total("Cash returned"))} />
         <Metric label="Gold purchases settled" value={currency(total("Gold purchase settled"))} />
       </div>
-      <Card><CardHeader><CardTitle>Current financing balances by customer</CardTitle><p className="text-xs text-[#7c8793]">Each customer appears once. Expand balances to see supplier, customer, and buyer-financing positions separately; generate one statement to see their combined transaction history.</p></CardHeader><CardContent><ReportTable rows={combinedFinancingAccounts.map((account) => ({ ...account, type: "combined-financing" }))} columns={financingAccountColumns} emptyMessage="No financing accounts found." onCustomerClick={openCustomer} onStatementClick={renderFinancingStatement} /></CardContent></Card>
+      <Card><CardHeader><CardTitle>Current financing balances by customer</CardTitle><p className="text-xs text-[#7c8793]">Each customer appears once. Expand balances to see each ledger and the net position; generate one statement to see their combined transaction history.</p></CardHeader><CardContent><ReportTable rows={combinedFinancingAccounts.map((account) => ({ ...account, type: "combined-financing" }))} columns={financingAccountColumns} emptyMessage="No financing accounts found." onCustomerClick={openCustomer} onStatementClick={renderFinancingStatement} /></CardContent></Card>
       <Card><CardHeader><CardTitle>Combined financing activity</CardTitle><p className="text-xs text-[#7c8793]">Supplier advance and customer financing activity within the selected date range. Select a customer name to view their details.</p></CardHeader><CardContent><ReportTable rows={financingRows} columns={financingColumns} emptyMessage="No supplier advance or customer financing activity in this date range." onCustomerClick={openCustomer} /></CardContent></Card>
     </> : <>
       <Card className="financing-summary-print-root">
@@ -1314,6 +1359,9 @@ export function ReportsDashboard() {
                   <p>Buyer financing: <strong>{(statement.buyerFinancingBalance ?? 0) > 0
                     ? "Customer owes Big Joe"
                     : (statement.buyerFinancingBalance ?? 0) < 0 ? "Big Joe owes customer" : "Settled"} {currency(Math.abs(statement.buyerFinancingBalance ?? 0))}</strong></p>
+                  <p>Net position: <strong>{(statement.netBalance ?? 0) > 0
+                    ? "Big Joe owes supplier"
+                    : (statement.netBalance ?? 0) < 0 ? "Supplier owes Big Joe" : "Settled"} {currency(Math.abs(statement.netBalance ?? 0))}</strong></p>
                 </> : <p>Current position: <strong>{statement.type === "customer-advances"
                   ? `${statement.customerKind === "SUPPLIER"
                     ? statement.balance < 0 ? "Supplier owes Big Joe" : statement.balance > 0 ? "Credit owed to supplier" : "Settled"
@@ -1329,7 +1377,7 @@ export function ReportsDashboard() {
                 </table>
               </div>
               <p className="mt-3 text-xs text-[#637083]">{statement.type === "combined-financing"
-                ? "The running balance resets by account category. Supplier advances, customer advances, and buyer financing balances are shown separately and are not netted."
+                ? "The activity running balance resets by account category. The summary above nets the supplier advance and customer advance balances against buyer financing."
                 : statement.type === "customer-advances"
                   ? statement.customerKind === "SUPPLIER"
                     ? "A negative balance means the supplier owes Big Joe Gold; a positive balance is credit owed to the supplier."

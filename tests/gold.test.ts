@@ -6,7 +6,8 @@ import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { calculateBatchSaleQuote, calculateMeasuredSaleQuote, calculatePurchaseMeasurements, calculateSaleQuote, calculateTradeAmount, calculateWeightedBatchDensity, inferSaleDownWeightFromReceipts, planFifo } from "../src/lib/gold";
 import { DEFAULT_PURCHASE_FORMULA_RULES, PURCHASE_FORMULA_VERSION, purchaseFormulaRules } from "../src/lib/purchase-formula";
 import { HttpError, readJson } from "../src/lib/http";
-import { receivingSchema, saleCorrectionSchema, saleSchema, tradeSchema } from "../src/lib/validation";
+import { receivingBatchSchema, receivingSchema, saleCorrectionSchema, saleSchema, tradeSchema } from "../src/lib/validation";
+import { allocateProportionalReceivingPayments } from "../src/lib/receiving";
 import { customerSchema, customerUpdateSchema } from "../src/lib/validation";
 import { formatCurrency, formatCurrencyExact, formatCurrencyWholeGhsTruncated, formatPriceAmount, formatTwoDecimalTruncated, formatWeight } from "../src/lib/formatters";
 import { formatCompactNumberTruncated, formatDecimalTruncated } from "../src/lib/decimal-policy";
@@ -20,7 +21,7 @@ import { calculateCashBalances, calculateRunningCashBalances } from "../src/lib/
 import { adjustSaleAllocations } from "../src/lib/sales-allocation";
 import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoAccountSummaries, buildManualMomoStatement } from "../src/lib/manual-momo";
-import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateNetProfit, calculateProfitMetrics } from "../src/lib/reporting";
+import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateCombinedFinancingNetBalance, calculateNetProfit, calculateProfitMetrics } from "../src/lib/reporting";
 import { calculateMansoBranchPurchase } from "../src/lib/manso-branch";
 import { customerAdvanceSchema, expenseSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, mansoBranchActionSchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
 
@@ -377,6 +378,44 @@ test("receiving validation rejects zero down-weight and manual calculation overr
   assert.equal(receivingSchema.safeParse({ ...valid, financingAccountId: "buyer-finance-id" }).success, false);
 });
 
+test("receiving batches validate item-level measurements and shared payment details", () => {
+  const valid = {
+    action: "COMPLETE",
+    customerId: "supplier-id",
+    transactionDate: "2026-10-26T06:00:00.000Z",
+    cashAccountId: "cash-account-id",
+    amountPaid: "75.00",
+    paymentMethod: "CASH",
+    storageLocation: "Main storage",
+    items: [
+      { topGrams: "1250", downGrams: "500", boardPriceId: "price-one", batchNumber: "A" },
+      { topGrams: "1500", downGrams: "600", boardPriceId: "price-two", batchNumber: "B" },
+    ],
+  };
+  assert.equal(receivingBatchSchema.safeParse(valid).success, true);
+  assert.equal(receivingBatchSchema.safeParse({ ...valid, items: valid.items.slice(0, 1) }).success, false);
+  assert.equal(receivingBatchSchema.safeParse({ ...valid, amountPaid: "1.00", cashAccountId: "" }).success, false);
+  assert.equal(receivingBatchSchema.safeParse({ ...valid, financingAccountId: "account-id", amountPaid: "1.00" }).success, false);
+});
+
+test("shared receiving payments are split proportionally with exact cent totals", () => {
+  const shares = allocateProportionalReceivingPayments(
+    new Prisma.Decimal("50.00"),
+    [new Prisma.Decimal("100.00"), new Prisma.Decimal("50.00"), new Prisma.Decimal("25.00")],
+  );
+  assert.deepEqual(shares.map((share) => share.toFixed(2)), ["28.57", "14.29", "7.14"]);
+  assert.equal(shares.reduce((total, share) => total.plus(share), new Prisma.Decimal(0)).toFixed(2), "50.00");
+  assert.deepEqual(
+    allocateProportionalReceivingPayments(new Prisma.Decimal("0.01"), [new Prisma.Decimal("100"), new Prisma.Decimal("0.01")])
+      .map((share) => share.toFixed(2)),
+    ["0.01", "0.00"],
+  );
+  assert.throws(
+    () => allocateProportionalReceivingPayments(new Prisma.Decimal("100.02"), [new Prisma.Decimal("100"), new Prisma.Decimal("0.01")]),
+    /combined purchase value/,
+  );
+});
+
 test("customer gold advance actions validate payment, request, and stock fulfillment inputs", () => {
   assert.equal(customerAdvanceSchema.safeParse({
     action: "OPENING_BALANCE",
@@ -498,6 +537,13 @@ test("supplier gold fulfillment increases the amount owed to Big Joe", () => {
   assert.equal(balance.toFixed(2), "-68850.00");
 });
 
+test("combined financing offsets customer and supplier credits against buyer financing", () => {
+  assert.equal(calculateCombinedFinancingNetBalance(2_000_000, 0, 1_000_000), 1_000_000);
+  assert.equal(calculateCombinedFinancingNetBalance(0, 337_724.48, 359_383.37), -21_658.89);
+  assert.equal(calculateCombinedFinancingNetBalance(500_000, 0, 1_000_000), -500_000);
+  assert.equal(calculateCombinedFinancingNetBalance(1_000.01, 0, 500), 500.01);
+});
+
 test("customer validation supports alternate phone and archive-only updates", () => {
   const customer = customerSchema.safeParse({
     name: "Example Customer",
@@ -542,11 +588,14 @@ test("customer validation supports alternate phone and archive-only updates", ()
 test("currency formatting preserves cents for values beyond JavaScript safe integer precision", () => {
   assert.match(formatCurrencyExact("100000000000000.23"), /100,000,000,000,000\.23/);
   assert.equal(formatPriceAmount("999999999999.123456", "GHS"), "GHS 999,999,999,999.12");
+  assert.equal(formatCurrencyExact("1.239e3"), "GH₵ 1,239.00");
+  assert.equal(formatPriceAmount("-1.239e3", "GHS"), "-GHS 1,239");
 });
 
 test("numeric values truncate toward zero at display and decimal precision limits", () => {
   assert.equal(formatCurrency("1.239"), "GH₵ 1.23");
   assert.equal(formatCurrency("-1.239"), "-GH₵ 1.23");
+  assert.equal(formatCurrency("1.299", { maximumFractionDigits: 1 }), "GH₵1.2");
   assert.equal(formatDecimalTruncated("-1.239", 2), "-1.23");
   assert.equal(formatDecimalTruncated("1.23999", 5), "1.23");
   assert.equal(formatWeight("455.56999", "g", 5), "455.56 g");
@@ -557,6 +606,10 @@ test("numeric values truncate toward zero at display and decimal precision limit
   assert.equal(formatWeight("34.229", "kg", 5), "34.22 kg");
   assert.equal(formatWeight("1349095.099", "g", 2), "1,349,095.09 g");
   assert.equal(formatWeight("455.9", "g", 2), "455.9 g");
+  assert.equal(formatWeight("9007199254740993.999", "g", 5), "9,007,199,254,740,993.99 g");
+  assert.equal(formatWeight("1.239", "kg", -1), "1.23 kg");
+  assert.equal(formatTwoDecimalTruncated("1e-7"), "0.00");
+  assert.equal(formatTwoDecimalTruncated("1.999"), "1.99");
   assert.equal(formatCompactNumberTruncated(1999), "1.9K");
   assert.equal(new Prisma.Decimal("1.239").toDecimalPlaces(2).toString(), "1.23");
 });

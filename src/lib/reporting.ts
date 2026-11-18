@@ -1,4 +1,17 @@
 export type ReportGrouping = "day" | "week" | "month";
+
+export function calculateCombinedFinancingNetBalance(
+  supplierAdvanceBalance: number,
+  customerAdvanceBalance: number,
+  buyerFinancingBalance: number,
+) {
+  return (
+    Math.round(supplierAdvanceBalance * 100) +
+    Math.round(customerAdvanceBalance * 100) -
+    Math.round(buyerFinancingBalance * 100)
+  ) / 100;
+}
+
 export type TradeReportPoint = {
   transactionDate: string;
   type: string;

@@ -168,7 +168,7 @@ export function MansoBranchManagement({
         throw new Error(message);
       }
       const result = body as { reference: string; batchNumber?: string; amount: string; measurements?: { karat: string } };
-      showToast(`${payload.action === "RECEIVE_GOLD" ? "Gold receipt" : payload.action === "EXPENSE" ? "Branch expense" : payload.action === "ADVANCE" ? "Advance sent" : "Cash returned"} saved · ${result.reference}${result.batchNumber ? ` · Batch ${result.batchNumber}` : ""} · ${formatCurrency(Number(result.amount))}${result.measurements ? ` · ${Number(result.measurements.karat).toFixed(2)} kt` : ""}`);
+      showToast(`${payload.action === "RECEIVE_GOLD" ? "Gold receipt" : payload.action === "EXPENSE" ? "Branch expense" : payload.action === "ADVANCE" ? "Advance sent" : "Cash returned"} saved · ${result.reference}${result.batchNumber ? ` · Batch ${result.batchNumber}` : ""} · ${formatCurrency(Number(result.amount))}${result.measurements ? ` · ${formatTwoDecimalTruncated(result.measurements.karat)} kt` : ""}`);
       reset();
       await load(true);
     } catch (cause) {
@@ -356,7 +356,7 @@ export function MansoBranchManagement({
                     : movement.type === "TRANSFER_OUT" ? "Cash returned" : "Branch expense";
                   const measurement = trade?.purchaseMeasurement;
                   const details = trade
-                    ? `${trade.reference} · ${formatDecimalTruncated(trade.quantityKg, 2)} kg · actual cost ${formatCurrency(Number(trade.totalAmount))}${measurement ? ` · ${Number(measurement.karat).toFixed(2)} kt` : ""}`
+                    ? `${trade.reference} · ${formatDecimalTruncated(trade.quantityKg, 2)} kg · actual cost ${formatCurrency(Number(trade.totalAmount))}${measurement ? ` · ${formatTwoDecimalTruncated(measurement.karat)} kt` : ""}`
                     : movement.description ?? "—";
                   return <tr key={movement.id} className="border-b border-[#f0f2f4] last:border-0">
                     <td className="whitespace-nowrap px-3 py-3">{displayDate(movement.movementDate)}</td>

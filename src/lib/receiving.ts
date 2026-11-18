@@ -7,7 +7,7 @@ import { purchaseFormulaRules } from "@/lib/purchase-formula";
 import { resolveStorageLocation } from "@/lib/inventory";
 import { recordPaymentMovement } from "@/lib/finance";
 import { getBuyerFinanceBalance } from "@/lib/buyer-financing";
-import type { ReceivingInput } from "@/lib/validation";
+import type { ReceivingBatchInput, ReceivingInput } from "@/lib/validation";
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -240,4 +240,69 @@ export async function prepareReceivingForSave(userId: string, input: ReceivingIn
     maxWait: 10_000,
     timeout: 30_000,
   });
+}
+
+export function allocateProportionalReceivingPayments(
+  amountPaid: Prisma.Decimal,
+  purchaseAmounts: Prisma.Decimal[],
+) {
+  const totalPurchaseAmount = purchaseAmounts.reduce((total, amount) => total.plus(amount), new Prisma.Decimal(0));
+  if (purchaseAmounts.length === 0 || !totalPurchaseAmount.greaterThan(0) || amountPaid.isNegative()
+    || amountPaid.greaterThan(totalPurchaseAmount)) {
+    throw new HttpError("The payment must be between zero and the combined purchase value", 400);
+  }
+  const paidCents = amountPaid.mul(100).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP);
+  const purchaseCents = purchaseAmounts.map((amount) => amount.mul(100).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP));
+  const totalCents = purchaseCents.reduce((total, cents) => total.plus(cents), new Prisma.Decimal(0));
+  const sharesInCents = purchaseCents.map((cents) => paidCents.mul(cents).div(totalCents).toDecimalPlaces(0, Prisma.Decimal.ROUND_DOWN));
+  const fractions = purchaseCents.map((cents, index) => ({
+    index,
+    fraction: paidCents.mul(cents).div(totalCents).minus(sharesInCents[index]),
+  })).sort((left, right) => right.fraction.comparedTo(left.fraction));
+  let centsToDistribute = paidCents.minus(sharesInCents.reduce((total, cents) => total.plus(cents), new Prisma.Decimal(0)));
+  for (const { index } of fractions) {
+    if (!centsToDistribute.greaterThan(0)) break;
+    if (sharesInCents[index].lessThan(purchaseCents[index])) {
+      sharesInCents[index] = sharesInCents[index].plus(1);
+      centsToDistribute = centsToDistribute.minus(1);
+    }
+  }
+  if (!centsToDistribute.isZero()) throw new HttpError("Unable to allocate the payment across the received goods", 400);
+  return sharesInCents.map((cents) => cents.div(100));
+}
+
+export async function prepareReceivingBatchForSave(userId: string, input: ReceivingBatchInput) {
+  return prisma.$transaction(async (tx) => {
+    const rules = purchaseFormulaRules(await tx.purchaseFormulaConfig.findUnique({ where: { id: "default" } }));
+    const calculations = await Promise.all(input.items.map(async (item) => {
+      const boardPrice = await tx.goldBoardPrice.findUnique({ where: { id: item.boardPriceId } });
+      if (!boardPrice || boardPrice.priceType !== "RECEIVING" || boardPrice.currency !== "GHS" || boardPrice.priceUnit !== rules.priceUnit) {
+        throw new HttpError("Select a GHS board price quoted in the compatible pure-gold gram unit", 400);
+      }
+      return calculatePurchaseMeasurements(item.topGrams, item.downGrams, boardPrice.priceAmount.toString(), rules);
+    }));
+    const paymentShares = input.financingAccountId
+      ? input.items.map(() => new Prisma.Decimal(0))
+      : allocateProportionalReceivingPayments(new Prisma.Decimal(input.amountPaid), calculations.map(({ amount }) => amount));
+    const trades = [];
+    for (const [index, item] of input.items.entries()) {
+      trades.push(await saveReceiving(tx, userId, {
+        action: "COMPLETE",
+        customerId: input.customerId,
+        transactionDate: input.transactionDate,
+        topGrams: item.topGrams,
+        downGrams: item.downGrams,
+        boardPriceId: item.boardPriceId,
+        batchNumber: item.batchNumber,
+        storageLocation: input.storageLocation,
+        amountPaid: paymentShares[index].toFixed(2),
+        cashAccountId: input.cashAccountId,
+        paymentMethod: input.paymentMethod,
+        financingAccountId: input.financingAccountId,
+        note: input.note,
+        supportingDocumentRef: input.supportingDocumentRef,
+      }));
+    }
+    return trades;
+  }, { maxWait: 10_000, timeout: 60_000 });
 }

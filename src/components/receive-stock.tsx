@@ -86,6 +86,16 @@ type FormValues = {
   supportingDocumentRef: string;
 };
 
+type StagedReceivingBatch = {
+  id: string;
+  topGrams: string;
+  downGrams: string;
+  boardPriceId: string;
+  priceAmount: string;
+  purchaseAmount: string;
+  karat: string;
+};
+
 type QuickCustomer = {
   name: string;
   type: "INDIVIDUAL" | "BUSINESS";
@@ -147,7 +157,15 @@ const emptyForm = (): FormValues => ({
 });
 
 function responseMessage(body: unknown, fallback: string) {
-  if (body && typeof body === "object" && "error" in body && typeof body.error === "string") return body.error;
+  const error = body && typeof body === "object" && "error" in body && typeof body.error === "string"
+    ? body.error
+    : "";
+  if (body && typeof body === "object" && "fields" in body && body.fields && typeof body.fields === "object") {
+    const messages = Object.entries(body.fields)
+      .flatMap(([field, errors]) => Array.isArray(errors) ? errors.filter((message): message is string => typeof message === "string").map((message) => `${field}: ${message}`) : []);
+    if (messages.length) return messages.join(" ");
+  }
+  if (error) return error;
   if (body && typeof body === "object" && "message" in body && typeof body.message === "string") return body.message;
   return fallback;
 }
@@ -173,6 +191,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
   const [formulaRules, setFormulaRules] = useState<PurchaseFormulaRules>(DEFAULT_PURCHASE_FORMULA_RULES);
   const [formulaRulesLoaded, setFormulaRulesLoaded] = useState(false);
   const [values, setValues] = useState<FormValues>(emptyForm);
+  const [stagedBatches, setStagedBatches] = useState<StagedReceivingBatch[]>([]);
   const [amountPaidTouched, setAmountPaidTouched] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [detailRecord, setDetailRecord] = useState<ReceivingRecord | null>(null);
@@ -218,11 +237,16 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
     }
   }, [formulaRules, selectedPrice, values.downGrams, values.topGrams]);
   const karatLimitError = calculation.error.includes("Calculated karat exceeds 24");
+  const stagedTotalAmount = stagedBatches.reduce(
+    (total, batch) => total.plus(batch.purchaseAmount),
+    new Prisma.Decimal(0),
+  );
+  const purchaseTotal = stagedBatches.length ? stagedTotalAmount : calculation.result?.amount ?? null;
   const amountPaid = amountPaidTouched
     ? values.amountPaid
     : "0";
   const paymentAmountValid = /^\d{1,14}(?:\.\d{1,2})?$/.test(amountPaid);
-  const paymentError = !financingAccountId && calculation.result && paymentAmountValid && calculation.result.amount.lessThan(amountPaid)
+  const paymentError = !financingAccountId && purchaseTotal && paymentAmountValid && purchaseTotal.lessThan(amountPaid)
     ? "Amount paid cannot exceed the calculated purchase amount."
     : "";
 
@@ -345,6 +369,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
   }
 
   function editDraft(record: ReceivingRecord) {
+    setStagedBatches([]);
     setFinancingAccountId("");
     setEditingId(record.id);
     setAmountPaidTouched(true);
@@ -366,18 +391,52 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function save(action: "DRAFT" | "COMPLETE") {
+  function addCurrentBatch() {
     setError("");
     if (!values.customerId) {
       setCustomerRequiredAlertOpen(true);
       return;
     }
-    if (!values.boardPriceId) {
+    if (!calculation.result || !selectedPrice) {
+      setError(calculation.error || "Enter valid top and down weights before adding this good to the batch list.");
+      return;
+    }
+    if (stagedBatches.length >= 50) {
+      setError("A single receiving entry can include no more than 50 separate goods.");
+      return;
+    }
+    setStagedBatches((current) => [...current, {
+      id: crypto.randomUUID(),
+      topGrams: values.topGrams,
+      downGrams: values.downGrams,
+      boardPriceId: selectedPrice.id,
+      priceAmount: String(selectedPrice.priceAmount),
+      purchaseAmount: calculation.result.amount.toFixed(2),
+      karat: calculation.result.karat.toString(),
+    }]);
+    setValues((current) => ({ ...current, topGrams: "", downGrams: "", batchNumber: "" }));
+  }
+
+  async function save(action: "DRAFT" | "COMPLETE") {
+    setError("");
+    if (stagedBatches.length && action === "DRAFT") {
+      setError("Complete the staged goods together, or clear them before saving a single-item draft.");
+      return;
+    }
+    if (!values.customerId) {
+      setCustomerRequiredAlertOpen(true);
+      return;
+    }
+    if (!stagedBatches.length && !values.boardPriceId) {
       setError("Select a gold board price before saving.");
       return;
     }
-    if (!calculation.result) {
+    if (!stagedBatches.length && !calculation.result) {
       setError(calculation.error || "Enter valid Top weight and Down weight values in grams to calculate this purchase.");
+      return;
+    }
+    if (stagedBatches.length && (values.topGrams.trim() || values.downGrams.trim())) {
+      setError("Add the current good to the batch list or clear its weights before proceeding to payment.");
       return;
     }
     if (paymentError) {
@@ -388,18 +447,44 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
       setError("Enter an amount paid of zero or more with up to 2 decimal places.");
       return;
     }
+    if (!financingAccountId && Number(amountPaid) > 0 && !values.cashAccountId) {
+      setError("Select the cash / bank account used for the payment.");
+      return;
+    }
     setBusy(true);
     setBusyMessage(action === "COMPLETE" ? "Generating receipt…" : "Saving…");
     let navigatingToReceipt = false;
     try {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      const payload = {
-        action,
-        ...values,
-        amountPaid: financingAccountId ? "0" : amountPaid,
-        financingAccountId: action === "COMPLETE" ? financingAccountId : "",
+      const sharedPayload = {
+        action: "COMPLETE",
+        customerId: values.customerId,
         transactionDate: new Date(values.transactionDate).toISOString(),
+        storageLocation: values.storageLocation,
+        amountPaid: financingAccountId ? "0" : amountPaid,
+        cashAccountId: values.cashAccountId,
+        paymentMethod: values.paymentMethod,
+        financingAccountId,
+        note: values.note,
+        supportingDocumentRef: values.supportingDocumentRef,
       };
+      const payload = stagedBatches.length
+        ? stagedBatches.length === 1
+          ? {
+            ...sharedPayload,
+            ...stagedBatches.map(({ topGrams, downGrams, boardPriceId }) => ({ topGrams, downGrams, boardPriceId }))[0],
+          }
+          : {
+            ...sharedPayload,
+            items: stagedBatches.map(({ topGrams, downGrams, boardPriceId }) => ({ topGrams, downGrams, boardPriceId })),
+          }
+        : {
+          action,
+          ...values,
+          amountPaid: financingAccountId ? "0" : amountPaid,
+          financingAccountId: action === "COMPLETE" ? financingAccountId : "",
+          transactionDate: new Date(values.transactionDate).toISOString(),
+        };
       const response = await fetch(editingId ? `/api/receiving/${editingId}` : "/api/receiving", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -407,9 +492,15 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
       });
       const body: unknown = await response.json();
       if (!response.ok) throw new Error(responseMessage(body, "Unable to save this purchase"));
-      const saved = body as ReceivingRecord;
-      showToast(action === "DRAFT" ? `Draft ${saved.reference} saved. No stock or payment was created.` : `Purchase ${saved.reference} completed.`);
+      const savedTrades = Array.isArray(body) ? body as ReceivingRecord[] : [body as ReceivingRecord];
+      const saved = savedTrades[0];
+      showToast(action === "DRAFT"
+        ? `Draft ${saved.reference} saved. No stock or payment was created.`
+        : savedTrades.length > 1
+          ? `${savedTrades.length} separate purchases completed. The payment was split proportionally by purchase value.`
+          : `Purchase ${saved.reference} completed.`);
       setEditingId(null);
+      setStagedBatches([]);
       setFinancingAccountId("");
       setAmountPaidTouched(false);
       setValues({ ...emptyForm(), boardPriceId: compatiblePrices[0]?.id ?? "" });
@@ -491,11 +582,12 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
         <p className="text-[9px] text-[#8993a0]">Calculated measurements are read-only. Drafts do not post stock or payments.</p>
       </CardHeader>
       <CardContent className="px-3 pb-3">
+        <fieldset disabled={stagedBatches.length > 0} className="contents">
         <div className="grid gap-2 sm:grid-cols-2">
           <FormField label="Select customer" htmlFor="receiving-customer">
             <div className="flex gap-2">
-              <CustomerAutocomplete id="receiving-customer" customers={customers} value={values.customerId} onChange={selectReceivingCustomer} placeholder="Search registered customers" />
-              {canCreateCustomer && <Button type="button" variant="gold" size="sm" className="h-9 shrink-0 px-2.5 text-[10px]" onClick={() => setQuickCustomerOpen(true)} aria-label="Create customer"><Plus size={14} /> New</Button>}
+              <CustomerAutocomplete id="receiving-customer" customers={customers} value={values.customerId} onChange={selectReceivingCustomer} placeholder="Search registered customers" disabled={stagedBatches.length > 0} />
+              {canCreateCustomer && <Button type="button" variant="gold" size="sm" className="h-9 shrink-0 px-2.5 text-[10px]" onClick={() => setQuickCustomerOpen(true)} aria-label="Create customer" disabled={stagedBatches.length > 0}><Plus size={14} /> New</Button>}
             </div>
           </FormField>
           <FormField label="Transaction date" htmlFor="receiving-date">
@@ -510,6 +602,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
             <input id="receiving-location" value={values.storageLocation} onChange={(event) => updateField("storageLocation", event.target.value)} className={`${fieldControlClass}`} maxLength={120} required />
           </FormField>
         </div>
+        </fieldset>
       </CardContent>
     </Card>
     <Card className="rounded-[10px]">
@@ -519,7 +612,7 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
           <input id="receiving-recorded-by" value={recordedBy} readOnly className={`${fieldControlClass} bg-[#f7f8fa]`} />
         </FormField>
         {canUseBuyerFinancing && <FormField label="Buyer financing (optional)" htmlFor="receiving-financing" hint="Selecting an account also selects its buyer as the purchase customer. Use this when that buyer is supplying the gold.">
-          <select id="receiving-financing" value={financingAccountId} onChange={(event) => selectFinancingAccount(event.target.value)} className={fieldControlClass}>
+          <select id="receiving-financing" value={financingAccountId} onChange={(event) => selectFinancingAccount(event.target.value)} className={fieldControlClass} disabled={stagedBatches.length > 0}>
             <option value="">Do not apply buyer financing</option>
             {financingAccounts.map((account) => {
               const balance = Number(account.balance);
@@ -528,11 +621,11 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
             })}
           </select>
         </FormField>}
-        {financingAccountId && calculation.result && <p className="rounded-md border border-[#d6aa42] bg-[#f8e6b0] px-3 py-2 text-[10px] text-[#465362] sm:col-span-2">
-          Gold value {formatCurrency(calculation.result.amount.toFixed(2))} will be applied to {financingAccounts.find((account) => account.id === financingAccountId)?.customer.name}&apos;s financing balance.
+        {financingAccountId && purchaseTotal && <p className="rounded-md border border-[#d6aa42] bg-[#f8e6b0] px-3 py-2 text-[10px] text-[#465362] sm:col-span-2">
+          Gold value {formatCurrency(purchaseTotal.toFixed(2))} will be applied to {financingAccounts.find((account) => account.id === financingAccountId)?.customer.name}&apos;s financing balance.
           {(() => {
             const balance = new Prisma.Decimal(financingAccounts.find((account) => account.id === financingAccountId)?.balance ?? 0)
-              .minus(calculation.result.amount);
+              .minus(purchaseTotal);
             return balance.greaterThan(0)
               ? ` Customer will still owe ${formatCurrency(balance.toFixed(2))}.`
               : balance.lessThan(0)
@@ -584,6 +677,35 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
       </CardContent>
     </Card>
 
+    {!editingId && <Card className="rounded-[10px] xl:col-span-2">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 px-3 pb-2 pt-2.5">
+        <div>
+          <CardTitle className="text-[13px]">Goods to receive</CardTitle>
+          <p className="mt-1 text-[9px] text-[#8993a0]">Add each good separately before entering the shared payment. Each will be saved as its own purchase and stock batch.</p>
+        </div>
+        {stagedBatches.length > 0 && <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 text-[10px]" disabled={busy} onClick={() => setStagedBatches([])}><X size={12} /> Clear list</Button>}
+      </CardHeader>
+      <CardContent className="space-y-2 px-3 pb-3">
+        {stagedBatches.length > 0 && <div className="space-y-1 rounded-lg border border-[#e8ebef] p-2">
+          {stagedBatches.map((batch, index) => <div key={batch.id} className="flex items-center justify-between gap-3 border-b border-[#edf0f3] py-1.5 last:border-0">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold text-[#273342]">Good {index + 1} · {formatTwoDecimalTruncated(batch.topGrams)} g top · {formatTwoDecimalTruncated(batch.downGrams)} g down · {formatTwoDecimalTruncated(batch.karat)} kt</p>
+              <p className="text-[9px] text-[#637083]">Price GHS {batch.priceAmount}/g · {formatCurrency(batch.purchaseAmount)}</p>
+            </div>
+            <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 px-2 text-[9px] text-rose-700" disabled={busy} onClick={() => setStagedBatches((current) => current.filter((entry) => entry.id !== batch.id))}><X size={11} /> Remove</Button>
+          </div>)}
+          <div className="flex flex-wrap justify-between gap-2 border-t border-[#e8ebef] pt-2 text-[10px] font-semibold text-[#273342]">
+            <span>{stagedBatches.length} separate goods · {formatTwoDecimalTruncated(stagedBatches.reduce((total, batch) => total.plus(batch.topGrams), new Prisma.Decimal(0)).toString())} g total</span>
+            <span>Combined value: {formatCurrency(stagedTotalAmount.toFixed(2))}</span>
+          </div>
+        </div>}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[9px] text-[#637083]">{stagedBatches.length ? "Enter the next good's measurements above, then add it here." : "To receive multiple goods from this customer, add each good here before entering payment details."}</p>
+          <Button type="button" variant="outline" size="sm" className="h-8 border-[#d6aa42] text-[10px]" disabled={busy || loading || !calculation.result || stagedBatches.length >= 50} onClick={addCurrentBatch}><Plus size={12} /> Add current good to batches</Button>
+        </div>
+      </CardContent>
+    </Card>}
+
     <Card className="rounded-[10px] xl:col-span-2">
       <CardHeader className="px-3 pb-2 pt-2.5"><CardTitle className="text-[13px]">Payment information (optional)</CardTitle></CardHeader>
       <CardContent className="grid gap-2 px-3 pb-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -598,11 +720,11 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
               {cashAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.type.replaceAll("_", " ")}</option>)}
             </select>
           </FormField>
-          <FormField label={financingAccountId ? "Financed purchase value (GHS)" : "Amount paid (GHS)"} htmlFor="receiving-paid" hint={financingAccountId ? "No cash payment is recorded. The calculated gold value settles the financing balance." : "Optional; defaults to GHS 0. Enter an amount only if a payment was made."}>
-            <GhanaAmountInput id="receiving-paid" min="0" step="0.01" disabled={Boolean(financingAccountId)} value={financingAccountId ? calculation.result?.amount.toFixed(2) ?? "0.00" : amountPaid} onChange={(value) => updateField("amountPaid", value)} onBlur={() => { if (!values.amountPaid.trim() && amountPaidTouched) { setValues((current) => ({ ...current, amountPaid: "0" })); setAmountPaidTouched(false); } }} className={`${fieldControlClass} ${financingAccountId ? "bg-[#f7f8fa]" : ""}`} />
+          <FormField label={financingAccountId ? "Financed purchase value (GHS)" : "Amount paid (GHS)"} htmlFor="receiving-paid" hint={financingAccountId ? "No cash payment is recorded. The purchase value settles the financing balance." : stagedBatches.length > 1 ? "One shared payment is split proportionally across the separate purchase values." : "Optional; defaults to GHS 0. Enter an amount only if a payment was made."}>
+            <GhanaAmountInput id="receiving-paid" min="0" step="0.01" disabled={Boolean(financingAccountId)} value={financingAccountId ? purchaseTotal ? formatTwoDecimalTruncated(purchaseTotal.toString()) : "0.00" : amountPaid} onChange={(value) => updateField("amountPaid", value)} onBlur={() => { if (!values.amountPaid.trim() && amountPaidTouched) { setValues((current) => ({ ...current, amountPaid: "0" })); setAmountPaidTouched(false); } }} className={`${fieldControlClass} ${financingAccountId ? "bg-[#f7f8fa]" : ""}`} />
           </FormField>
           <FormField label="Outstanding (GHS)" htmlFor="receiving-balance">
-            <input id="receiving-balance" value={financingAccountId ? formatCurrencyExact("0.00") : calculation.result ? formatCurrencyExact(calculation.result.amount.minus(paymentAmountValid ? amountPaid : "0").greaterThan(0) ? calculation.result.amount.minus(paymentAmountValid ? amountPaid : "0").toFixed(2) : "0.00") : "—"} readOnly className={`${fieldControlClass} bg-[#f7f8fa]`} />
+            <input id="receiving-balance" value={financingAccountId ? formatCurrencyExact("0.00") : purchaseTotal ? formatCurrencyExact(purchaseTotal.minus(paymentAmountValid ? amountPaid : "0").greaterThan(0) ? purchaseTotal.minus(paymentAmountValid ? amountPaid : "0").toString() : "0.00") : "—"} readOnly className={`${fieldControlClass} bg-[#f7f8fa]`} />
           </FormField>
           <FormField label="Notes" htmlFor="receiving-notes" className="sm:col-span-2 xl:col-span-4">
             <textarea id="receiving-notes" rows={2} value={values.note} onChange={(event) => updateField("note", event.target.value)} className={`${fieldControlClass} h-auto resize-y py-2`} maxLength={500} />
@@ -614,12 +736,12 @@ export function ReceiveStock({ canWrite, canCreateCustomer, canReadPersonal, can
           onConfirm={() => {}}
         />
         <div className="flex flex-wrap justify-end gap-2 sm:col-span-2 xl:col-span-4">
-          <Button type="button" variant="outline" size="sm" className="h-8 text-[10px]" disabled={busy || loading} onClick={() => { setEditingId(null); setFinancingAccountId(""); setAmountPaidTouched(false); setValues({ ...emptyForm(), boardPriceId: compatiblePrices[0]?.id ?? "" }); setError(""); }}><X size={12} /> Clear</Button>
-          {canWrite && <Button type="button" variant="outline" size="sm" className="h-8 border-[#d6aa42] bg-[#f8e6b0] text-[10px] text-[#6d4d13] hover:bg-[#f1d98c]" disabled={busy || loading} onClick={() => { void save("DRAFT"); }}><Save size={12} />{busy ? "Saving…" : "Save as Draft"}</Button>}
+          <Button type="button" variant="outline" size="sm" className="h-8 text-[10px]" disabled={busy || loading} onClick={() => { setEditingId(null); setStagedBatches([]); setFinancingAccountId(""); setAmountPaidTouched(false); setValues({ ...emptyForm(), boardPriceId: compatiblePrices[0]?.id ?? "" }); setError(""); }}><X size={12} /> Clear</Button>
+          {canWrite && <Button type="button" variant="outline" size="sm" className="h-8 border-[#d6aa42] bg-[#f8e6b0] text-[10px] text-[#6d4d13] hover:bg-[#f1d98c]" disabled={busy || loading || stagedBatches.length > 0} onClick={() => { void save("DRAFT"); }}><Save size={12} />{busy ? "Saving…" : "Save as Draft"}</Button>}
           {canWrite && (formulaRules.ownerConfirmed
-            ? <Button type="button" variant="gold" size="sm" className="h-8 bg-[#f6bd2d] text-[10px] text-[#17212f] hover:bg-[#e9ae1d]" disabled={busy || loading || !calculation.result || Boolean(paymentError)} onClick={() => { void save("COMPLETE"); }}>{busy && busyMessage ? <LoaderCircle size={12} className="animate-spin" aria-hidden="true" /> : <Check size={12} />}{busy && busyMessage ? busyMessage : "Complete Purchase"}</Button>
+            ? <Button type="button" variant="gold" size="sm" className="h-8 bg-[#f6bd2d] text-[10px] text-[#17212f] hover:bg-[#e9ae1d]" disabled={busy || loading || (!stagedBatches.length && !calculation.result) || (stagedBatches.length > 0 && Boolean(values.topGrams.trim() || values.downGrams.trim()) && !calculation.result) || Boolean(paymentError)} onClick={() => { void save("COMPLETE"); }}>{busy && busyMessage ? <LoaderCircle size={12} className="animate-spin" aria-hidden="true" /> : <Check size={12} />}{busy && busyMessage ? busyMessage : stagedBatches.length > 1 ? `Complete ${stagedBatches.length} Purchases` : "Complete Purchase"}</Button>
             : <Button type="button" variant="gold" size="sm" className="h-8 text-[10px]" disabled>Complete Purchase — owner confirmation required</Button>)}
-          {editingId && <Button type="button" variant="outline" size="sm" className="h-8 text-[10px]" disabled={busy} onClick={() => { setEditingId(null); setFinancingAccountId(""); setAmountPaidTouched(false); setValues({ ...emptyForm(), boardPriceId: compatiblePrices[0]?.id ?? "" }); }}>Cancel edit</Button>}
+          {editingId && <Button type="button" variant="outline" size="sm" className="h-8 text-[10px]" disabled={busy} onClick={() => { setEditingId(null); setStagedBatches([]); setFinancingAccountId(""); setAmountPaidTouched(false); setValues({ ...emptyForm(), boardPriceId: compatiblePrices[0]?.id ?? "" }); }}>Cancel edit</Button>}
         </div>
       </CardContent>
     </Card>

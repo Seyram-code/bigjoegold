@@ -1,12 +1,63 @@
 import { after } from "next/server";
+import { Prisma } from "@prisma/client";
 import { can, requireUser, userCan } from "@/lib/authz";
 import { apiError, readJson } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
-import { prepareReceivingForSave } from "@/lib/receiving";
-import { receivingSchema } from "@/lib/validation";
+import { prepareReceivingBatchForSave, prepareReceivingForSave } from "@/lib/receiving";
+import { receivingBatchSchema, receivingSchema } from "@/lib/validation";
 import { enforceUserRateLimit } from "@/lib/rate-limit";
 import { purchaseConfirmationSms, sendOwnerPaymentSms, sendOwnerSms } from "@/lib/sms";
 import { sendOwnerTransactionEmail } from "@/lib/email";
+
+type PurchaseNotificationRecord = {
+  id: string;
+  customerId: string | null;
+  reference: string;
+  quantityKg: Prisma.Decimal;
+  totalAmount: Prisma.Decimal;
+  paymentAmount: Prisma.Decimal;
+};
+
+function schedulePurchaseNotifications(trades: PurchaseNotificationRecord[], recordedBy: string) {
+  after(async () => {
+    for (const trade of trades) {
+      try {
+        const supplier = await prisma.customer.findUnique({ where: { id: trade.customerId ?? "" }, select: { name: true } });
+        if (new Prisma.Decimal(trade.paymentAmount).greaterThan(0)) {
+          try {
+            const initialPayment = await prisma.payment.findFirst({
+              where: { tradeId: trade.id },
+              select: { id: true },
+            });
+            if (initialPayment) await sendOwnerPaymentSms(initialPayment.id, recordedBy);
+          } catch (error) {
+            console.error("Purchase payment was saved, but its owner SMS could not be prepared.", error);
+          }
+        }
+        await sendOwnerSms(purchaseConfirmationSms({
+          reference: trade.reference,
+          supplierName: supplier?.name ?? "Unknown supplier",
+          quantityKg: trade.quantityKg.toString(),
+          totalAmount: trade.totalAmount.toString(),
+          amountPaid: trade.paymentAmount.toString(),
+          recordedBy,
+        }));
+        await sendOwnerTransactionEmail({
+          type: "PURCHASE",
+          reference: trade.reference,
+          counterpartyLabel: "Supplier",
+          counterpartyName: supplier?.name ?? "Unknown supplier",
+          quantityKg: trade.quantityKg.toString(),
+          totalAmount: trade.totalAmount.toString(),
+          amountPaid: trade.paymentAmount.toString(),
+          recordedBy,
+        });
+      } catch (error) {
+        console.error("Purchase was saved, but its owner notifications could not be prepared.", error);
+      }
+    }
+  });
+}
 
 export async function GET() {
   try {
@@ -51,49 +102,22 @@ export async function POST(request: Request) {
   try {
     const user = await requireUser("purchases:write");
     await enforceUserRateLimit(user.id, "purchase-write", { limit: 20 });
-    const input = receivingSchema.parse(await readJson(request));
+    const body = await readJson(request);
+    if (body && typeof body === "object" && !Array.isArray(body) && "items" in body) {
+      const input = receivingBatchSchema.parse(body);
+      if (input.financingAccountId && !userCan(user, "payments:write")) {
+        throw new Response("You do not have permission to apply buyer financing", { status: 403 });
+      }
+      const trades = await prepareReceivingBatchForSave(user.id, input);
+      schedulePurchaseNotifications(trades, user.name);
+      return Response.json(trades, { status: 201 });
+    }
+    const input = receivingSchema.parse(body);
     if (input.financingAccountId && !userCan(user, "payments:write")) {
       throw new Response("You do not have permission to apply buyer financing", { status: 403 });
     }
     const trade = await prepareReceivingForSave(user.id, input);
-    if (trade.status === "POSTED") {
-      after(async () => {
-        try {
-          const supplier = await prisma.customer.findUnique({ where: { id: trade.customerId ?? "" }, select: { name: true } });
-          if (trade.paymentAmount.greaterThan(0)) {
-            try {
-              const initialPayment = await prisma.payment.findFirst({
-                where: { tradeId: trade.id },
-                select: { id: true },
-              });
-              if (initialPayment) await sendOwnerPaymentSms(initialPayment.id, user.name);
-            } catch (error) {
-              console.error("Purchase payment was saved, but its owner SMS could not be prepared.", error);
-            }
-          }
-          await sendOwnerSms(purchaseConfirmationSms({
-            reference: trade.reference,
-            supplierName: supplier?.name ?? "Unknown supplier",
-            quantityKg: trade.quantityKg.toString(),
-            totalAmount: trade.totalAmount.toString(),
-            amountPaid: trade.paymentAmount.toString(),
-            recordedBy: user.name,
-          }));
-          await sendOwnerTransactionEmail({
-            type: "PURCHASE",
-            reference: trade.reference,
-            counterpartyLabel: "Supplier",
-            counterpartyName: supplier?.name ?? "Unknown supplier",
-            quantityKg: trade.quantityKg.toString(),
-            totalAmount: trade.totalAmount.toString(),
-            amountPaid: trade.paymentAmount.toString(),
-            recordedBy: user.name,
-          });
-        } catch (error) {
-          console.error("Purchase was saved, but its owner notifications could not be prepared.", error);
-        }
-      });
-    }
+    if (trade.status === "POSTED") schedulePurchaseNotifications([trade], user.name);
     return Response.json(trade, { status: 201 });
   } catch (error) {
     return apiError(error);

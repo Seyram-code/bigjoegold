@@ -12,7 +12,7 @@ import { PaymentProcessingOverlay } from "@/components/ui/payment-processing-ove
 import { GhanaAmountInput } from "@/components/ui/ghana-amount-input";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { fieldControlClass, FormField } from "@/components/ui/form-field";
-import { formatCurrency } from "@/lib/formatters";
+import { formatCurrency, formatCurrencyExact } from "@/lib/formatters";
 import { formatDecimalTruncated } from "@/lib/decimal-policy";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { useToast } from "@/components/ui/toast-provider";
@@ -481,12 +481,10 @@ function dateText(value: unknown, includeTime = false) {
 }
 
 function accountAmount(value: unknown, currency: string) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return "—";
-  const truncated = Number(formatDecimalTruncated(numberValue, 2));
+  if (value === null || value === undefined || value === "") return "—";
   try {
-    return new Intl.NumberFormat("en-GH", { style: "currency", currency, maximumFractionDigits: 2 }).format(truncated);
+    return formatCurrencyExact(formatDecimalTruncated(String(value), 2), currency);
   } catch {
-    return `${currency} ${formatDecimalTruncated(numberValue, 2)}`;
+    return `${currency} ${formatDecimalTruncated(String(value), 2)}`;
   }
 }
