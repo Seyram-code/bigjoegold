@@ -35,7 +35,7 @@ type Contact = { id: string; name: string; phone: string | null };
 const today = new Date().toISOString().slice(0, 10);
 const fieldLabelClass = "mb-1.5 block text-xs font-medium text-[#576170]";
 const dateInputClass = "h-10 w-full rounded-lg border border-[#dfe4e9] bg-white px-3 text-sm text-[#17212f]";
-const accountTypeLabel = (type: AccountType) => type === "CASH" ? "Cash" : type === "BANK" ? "Bank" : "Mobile Money";
+const accountTypeLabel = (type: AccountType) => type === "CASH" ? "Cash" : type === "BANK" ? "Bank" : "MM";
 
 function toApiDate(value: string) {
   return `${value}T12:00:00.000Z`;
@@ -111,7 +111,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
         { openingBalance: account.openingBalance.toFixed(2) },
       ])));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load Manual Bank & MOMO records.");
+      setError(loadError instanceof Error ? loadError.message : "Unable to load Manual Bank & MM records.");
     } finally {
       setLoading(false);
     }
@@ -179,12 +179,12 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
         }),
       });
       if (!response.ok) throw new Error(await responseError(response));
-      showToast("Manual Bank & MOMO payment recorded. It has not changed the system's payment transactions.");
+      showToast("Manual Bank & MM payment recorded. It has not changed the system's payment transactions.");
       setEntryForm((current) => ({ ...current, customerName: "", customerPhone: "", amount: "", transactionReference: "", note: "" }));
       setSelectedContactId("");
       await loadData();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to record the Manual Bank & MOMO payment.");
+      setError(saveError instanceof Error ? saveError.message : "Unable to record the Manual Bank & MM payment.");
     } finally {
       setSavingEntry(false);
     }
@@ -255,7 +255,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       showToast(`${account.name} ledger created.`);
       await loadData();
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : "Unable to create the Manual Bank & MOMO ledger.");
+      setError(createError instanceof Error ? createError.message : "Unable to create the Manual Bank & MM ledger.");
     } finally {
       setSavingNewAccount(false);
     }
@@ -264,8 +264,8 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1 className="text-xl font-bold text-[#17212f]">Manual Bank &amp; MOMO</h1>
-        <p className="mt-1 max-w-3xl text-sm text-[#78818d]">Create separate cash, bank, and mobile money ledgers for customer payments. These independent records do not create or change system transactions.</p>
+        <h1 className="text-xl font-bold text-[#17212f]">Manual Bank &amp; MM</h1>
+        <p className="mt-1 max-w-3xl text-sm text-[#78818d]">Create separate cash, bank, and MM ledgers for customer payments. These independent records do not create or change system transactions.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button asChild type="button" variant="outline"><Link href="/manual-momo/contacts">Manage contacts</Link></Button>
@@ -285,12 +285,12 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
             ...(type === "CASH" ? { bankNameTelco: "", accountNumber: "" } : {}),
           }));
         }} className={dateInputClass}>
-          <option value="CASH">Cash</option><option value="BANK">Bank</option><option value="MOBILE_MONEY">Mobile Money</option>
+          <option value="CASH">Cash</option><option value="BANK">Bank</option><option value="MOBILE_MONEY">MM</option>
         </select></label>
         <label><span className={fieldLabelClass}>Account name</span><input required minLength={2} maxLength={120} value={newAccountForm.name} onChange={(event) => setNewAccountForm((current) => ({ ...current, name: event.target.value }))} className={dateInputClass} /></label>
         {newAccountForm.type !== "CASH" && <>
           <label><span className={fieldLabelClass}>Bank Name/Telco</span><input required minLength={2} maxLength={120} value={newAccountForm.bankNameTelco} onChange={(event) => setNewAccountForm((current) => ({ ...current, bankNameTelco: event.target.value }))} className={dateInputClass} /></label>
-          <label><span className={fieldLabelClass}>{newAccountForm.type === "BANK" ? "Account number" : "MOMO number"}</span><input required maxLength={120} value={newAccountForm.accountNumber} onChange={(event) => setNewAccountForm((current) => ({ ...current, accountNumber: event.target.value }))} className={dateInputClass} /></label>
+          <label><span className={fieldLabelClass}>{newAccountForm.type === "BANK" ? "Account number" : "MM number"}</span><input required maxLength={120} value={newAccountForm.accountNumber} onChange={(event) => setNewAccountForm((current) => ({ ...current, accountNumber: event.target.value }))} className={dateInputClass} /></label>
         </>}
         <label><span className={fieldLabelClass}>Opening balance (GHS)</span><GhanaAmountInput min="0" step="0.01" value={newAccountForm.openingBalance} onChange={(openingBalance) => setNewAccountForm((current) => ({ ...current, openingBalance }))} className={dateInputClass} /></label>
         <div className="flex items-end"><Button type="submit" variant="gold" disabled={savingNewAccount || loading}>{savingNewAccount ? "Creating…" : "Create ledger"}</Button></div>
@@ -298,7 +298,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
     </Card>}
 
     <Card>
-      <CardHeader><CardTitle>Your Manual Bank &amp; MOMO ledgers</CardTitle><p className="text-xs text-[#7c8793]">Opening balances are maintained separately for each account.</p></CardHeader>
+      <CardHeader><CardTitle>Your Manual Bank &amp; MM ledgers</CardTitle><p className="text-xs text-[#7c8793]">Opening balances are maintained separately for each account.</p></CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-2">
         {data?.accounts.map((account) => <div key={account.id} className="rounded-xl border border-[#e7eaee] p-3">
           <h2 className="mb-1 text-sm font-semibold text-[#17212f]">{account.name}</h2>
@@ -363,7 +363,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
       </CardHeader>
       <CardContent>
         <div className="hidden print:block">
-          <h2 className="text-lg font-semibold">Big Joe Gold — {selectedStatementAccount ? `${selectedStatementAccount.name} Account Statement` : "Manual Bank & MOMO Daily Account Close"}</h2>
+          <h2 className="text-lg font-semibold">Big Joe Gold — {selectedStatementAccount ? `${selectedStatementAccount.name} Account Statement` : "Manual Bank & MM Daily Account Close"}</h2>
           <p className="text-xs">Period: {displayDate(`${from}T00:00:00.000Z`)} to {displayDate(`${to}T00:00:00.000Z`)}</p>
         </div>
         <section className="mb-5">
@@ -401,7 +401,7 @@ export function ManualMomo({ canWrite }: { canWrite: boolean }) {
             </table>
           </div>
         </section>
-        {loading && <p className="py-4 text-center text-sm text-[#7c8793]">Loading Manual Bank &amp; MOMO records…</p>}
+        {loading && <p className="py-4 text-center text-sm text-[#7c8793]">Loading Manual Bank &amp; MM records…</p>}
         {!loading && !accountSummaries.length && <p className="py-4 text-sm text-[#7c8793]">No account ledgers yet. Create one above to begin.</p>}
       </CardContent>
     </Card>

@@ -57,7 +57,7 @@ export async function PATCH(request: Request) {
     const user = await requireUser("payments:write");
     const input = manualMomoAccountSchema.parse(await readJson(request));
     const account = await prisma.manualMomoAccount.findUnique({ where: { id: input.accountId } });
-    if (!account) throw new HttpError("The selected Manual Bank & MOMO account is unavailable", 409);
+    if (!account) throw new HttpError("The selected Manual Bank & MM account is unavailable", 409);
 
     const openingDate = new Date(input.openingDate);
     const earliestEntry = await prisma.manualMomoEntry.findFirst({

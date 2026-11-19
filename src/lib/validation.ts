@@ -77,7 +77,7 @@ export const manualMomoAccountCreateSchema = z.object({
     context.addIssue({ code: "custom", path: ["bankNameTelco"], message: "Enter a bank or telco name" });
   }
   if (account.type !== "CASH" && !account.accountNumber) {
-    context.addIssue({ code: "custom", path: ["accountNumber"], message: "Enter an account or MOMO number" });
+    context.addIssue({ code: "custom", path: ["accountNumber"], message: "Enter an account or MM number" });
   }
 });
 

@@ -12,11 +12,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { id } = await params;
     const input = manualMomoContactSchema.parse(await readJson(request));
     const existing = await prisma.manualMomoContact.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw new HttpError("Manual Bank & MOMO contact not found", 404);
+    if (!existing) throw new HttpError("Manual Bank & MM contact not found", 404);
     const phone = input.phone ? formatManualMomoContactPhone(input.phone) : null;
     const phoneNormalized = normalizeManualMomoPhone(phone);
     if (phoneNormalized && await prisma.manualMomoContact.findFirst({ where: { phoneNormalized, id: { not: id } }, select: { id: true } })) {
-      throw new HttpError("A Manual Bank & MOMO contact already uses this phone number", 409);
+      throw new HttpError("A Manual Bank & MM contact already uses this phone number", 409);
     }
 
     const contact = await prisma.$transaction(async (tx) => {
@@ -36,7 +36,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return Response.json(contact);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return Response.json({ error: "A Manual Bank & MOMO contact already uses this phone number" }, { status: 409 });
+      return Response.json({ error: "A Manual Bank & MM contact already uses this phone number" }, { status: 409 });
     }
     return apiError(error);
   }
@@ -47,7 +47,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     const user = await requireUser("payments:write");
     const { id } = await params;
     const contact = await prisma.manualMomoContact.findUnique({ where: { id } });
-    if (!contact) throw new HttpError("Manual Bank & MOMO contact not found", 404);
+    if (!contact) throw new HttpError("Manual Bank & MM contact not found", 404);
     await prisma.$transaction(async (tx) => {
       await tx.manualMomoContact.delete({ where: { id } });
       await addAudit(tx, {

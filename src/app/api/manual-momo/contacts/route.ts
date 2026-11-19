@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const phone = input.phone ? formatManualMomoContactPhone(input.phone) : null;
     const phoneNormalized = normalizeManualMomoPhone(phone);
     if (phoneNormalized && await prisma.manualMomoContact.findUnique({ where: { phoneNormalized }, select: { id: true } })) {
-      throw new HttpError("A Manual Bank & MOMO contact already uses this phone number", 409);
+      throw new HttpError("A Manual Bank & MM contact already uses this phone number", 409);
     }
 
     const contact = await prisma.$transaction(async (tx) => {
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     return Response.json(contact, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return Response.json({ error: "A Manual Bank & MOMO contact already uses this phone number" }, { status: 409 });
+      return Response.json({ error: "A Manual Bank & MM contact already uses this phone number" }, { status: 409 });
     }
     return apiError(error);
   }

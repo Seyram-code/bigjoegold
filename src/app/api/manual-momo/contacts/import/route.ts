@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       const phone = normalizeManualMomoPhone(outcome.input.phone);
       if (phone && knownPhones.has(phone)) {
         outcome.status = "duplicate";
-        outcome.reason = "Phone number already belongs to a Manual Bank & MOMO contact";
+        outcome.reason = "Phone number already belongs to a Manual Bank & MM contact";
       } else if (phone) {
         knownPhones.add(phone);
       }

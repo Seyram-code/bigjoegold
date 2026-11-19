@@ -395,7 +395,7 @@ function navigationIcon(label: string) {
     Inventory: Package,
     Transactions: WalletCards,
     "Gold Price": Coins,
-    "Manual Bank & MOMO": Coins,
+    "Manual Bank & MM": Coins,
     "Manso Branch": Building2,
     Finance: CircleDollarSign,
     Reports: BarChart3,

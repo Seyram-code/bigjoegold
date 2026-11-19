@@ -29,7 +29,7 @@ test("sale and payment SMS messages identify their transaction context", () => {
   assert.match(sale, /SAL-1001/);
   assert.match(sale, /Kojo Buyer/);
   assert.match(payment, /PAY-1001/);
-  assert.match(payment, /mobile money/);
+  assert.match(payment, /MM/);
   assert.match(payment, /SAL-1001/);
 });
 
@@ -66,12 +66,12 @@ test("manual ledger transaction and login SMS include their record details", () 
 
 test("end-of-day SMS sends one GSM-safe summary per account, followed by a separate total", () => {
   const messages = manualMomoClosingSummarySms("2026-11-06", [
-    { name: "MOMO 1", type: "MOBILE_MONEY", balance: "1250.50" },
+    { name: "MM 1", type: "MOBILE_MONEY", balance: "1250.50" },
     { name: "Bank 1", type: "BANK", balance: "800.00" },
     { name: "Cash", type: "CASH", balance: "50.25" },
   ], "Ama");
   assert.equal(messages.length, 4);
-  assert.match(messages[0], /6 Nov 2026\. MOMO 1 \(mobile money\): GHS 1,250\.50/);
+  assert.match(messages[0], /6 Nov 2026\. MM 1 \(MM\): GHS 1,250\.50/);
   assert.match(messages[1], /6 Nov 2026\. Bank 1 \(bank\): GHS 800\.00/);
   assert.match(messages[2], /6 Nov 2026\. Cash \(cash\): GHS 50\.25/);
   assert.match(messages[3], /Total: GHS 2,100\.75/);
@@ -81,7 +81,7 @@ test("end-of-day SMS sends one GSM-safe summary per account, followed by a separ
 
 test("end-of-day SMS keeps every account in its own message for large ledgers", () => {
   const accounts = Array.from({ length: 10 }, (_, index) => ({
-    name: `Mobile Money Account ${index + 1}`,
+    name: `MM Account ${index + 1}`,
     type: "MOBILE_MONEY",
     balance: "1250.50",
   }));

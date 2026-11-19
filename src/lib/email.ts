@@ -127,7 +127,7 @@ export function ownerTransactionEmail(notification: OwnerTransactionEmail) {
         : [
         ["Direction", notification.direction === "INBOUND" ? "Money received" : "Money paid"],
         ["Amount", formatCurrencyExact(notification.amount)],
-        ["Method", notification.method.replaceAll("_", " ").toLowerCase()],
+        ["Method", notification.method === "MOBILE_MONEY" ? "MM" : notification.method.replaceAll("_", " ").toLowerCase()],
         ...(notification.tradeReference ? [["Transaction", notification.tradeReference]] : []),
         ...(notification.customerName ? [["Customer", notification.customerName]] : []),
         ["Recorded by", notification.recordedBy],

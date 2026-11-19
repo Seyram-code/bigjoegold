@@ -66,7 +66,7 @@ test("payment owner emails describe payment direction and transaction", () => {
   assert.match(message.subject, /Payment recorded.*PAY-1001/);
   assert.match(message.text, /Money received/);
   assert.match(message.text, /SAL-1001/);
-  assert.match(message.text, /mobile money/);
+  assert.match(message.text, /MM/);
 });
 
 test("sale correction emails summarize returned gold, credit, and refund", () => {

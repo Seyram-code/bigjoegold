@@ -190,7 +190,7 @@ export function ExpensesManagement({ canManage, canApprove }: { canManage: boole
           </FormField>
           <div className="sm:col-span-2 xl:col-span-3"><Button type="submit" disabled={busy || loading || !accounts.length}>{busy ? "Saving…" : "Record expense"}</Button></div>
         </form>
-        {!accounts.length && !loading && <p className="mt-3 text-xs text-amber-700">Add an active GHS cash, bank, or Mobile Money account before recording expenses.</p>}
+        {!accounts.length && !loading && <p className="mt-3 text-xs text-amber-700">Add an active GHS cash, bank, or MM account before recording expenses.</p>}
       </CardContent>
     </Card>}
 

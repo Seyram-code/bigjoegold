@@ -176,7 +176,7 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
       return;
     }
     if (!repaymentCashAccountId) {
-      setError("Select the cash, bank, or Mobile Money account receiving the repayment.");
+      setError("Select the cash, bank, or MM account receiving the repayment.");
       return;
     }
     setBusy(true);
@@ -221,7 +221,7 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
     <div className="flex items-start justify-between gap-3">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-[#17212f]">Customer Gold Financing</h1>
-        <p className="mt-1 max-w-3xl text-sm text-[#637083]">Record cash given to a buyer before they bring gold. Apply received gold in Receive Stock, and record any cash or Mobile Money repayments here.</p>
+        <p className="mt-1 max-w-3xl text-sm text-[#637083]">Record cash given to a buyer before they bring gold. Apply received gold in Receive Stock, and record any cash or MM repayments here.</p>
       </div>
       <Button variant="outline" size="sm" onClick={() => { void load(); }} disabled={loading}><RefreshCw size={14} /> Refresh</Button>
     </div>
@@ -266,7 +266,7 @@ export function BuyerFinancingManagement({ canWrite }: { canWrite: boolean }) {
     </Card>}
 
     {canWrite && repayableAccounts.length > 0 && <Card>
-      <CardHeader><CardTitle>Record customer repayment</CardTitle><p className="text-xs text-[#637083]">Choose the buyer, then record cash or Mobile Money received against their outstanding financing.</p></CardHeader>
+      <CardHeader><CardTitle>Record customer repayment</CardTitle><p className="text-xs text-[#637083]">Choose the buyer, then record cash or MM received against their outstanding financing.</p></CardHeader>
       <CardContent>
         <form onSubmit={(event) => { void submitRepayment(event); }} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <FormField label="Customer financing account" htmlFor="buyer-finance-repayment-customer">

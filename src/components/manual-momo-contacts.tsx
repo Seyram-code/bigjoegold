@@ -75,7 +75,7 @@ export function ManualMomoContacts({ canWrite }: { canWrite: boolean }) {
       if (!Array.isArray(result)) throw new Error("The contact service returned an invalid response.");
       setContacts(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load Manual Bank & MOMO contacts.");
+      setError(cause instanceof Error ? cause.message : "Unable to load Manual Bank & MM contacts.");
     } finally {
       setLoading(false);
     }
@@ -120,7 +120,7 @@ export function ManualMomoContacts({ canWrite }: { canWrite: boolean }) {
         body: JSON.stringify(form),
       });
       if (!response.ok) throw new Error(await responseError(response));
-      showToast(editing ? "Manual Bank & MOMO contact updated." : "Manual Bank & MOMO contact added.");
+      showToast(editing ? "Manual Bank & MM contact updated." : "Manual Bank & MM contact added.");
       setEditing(null);
       setForm(emptyForm());
       await load();
@@ -139,7 +139,7 @@ export function ManualMomoContacts({ canWrite }: { canWrite: boolean }) {
       const response = await fetch(`/api/manual-momo/contacts/${pendingDelete.id}`, { method: "DELETE" });
       if (!response.ok) throw new Error(await responseError(response));
       setPendingDelete(null);
-      showToast("Manual Bank & MOMO contact deleted.");
+      showToast("Manual Bank & MM contact deleted.");
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to delete the contact.");
@@ -251,9 +251,9 @@ export function ManualMomoContacts({ canWrite }: { canWrite: boolean }) {
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <Button asChild variant="outline" size="sm" className="mb-3"><Link href="/manual-momo"><ArrowLeft size={14} /> Manual Bank &amp; MOMO</Link></Button>
-        <h1 className="text-xl font-bold text-[#17212f]">Manual Bank &amp; MOMO Contacts</h1>
-        <p className="mt-1 text-sm text-[#78818d]">Manage a separate contact list for manual bank and MOMO payment records. These contacts are not added to the main customer directory.</p>
+        <Button asChild variant="outline" size="sm" className="mb-3"><Link href="/manual-momo"><ArrowLeft size={14} /> Manual Bank &amp; MM</Link></Button>
+        <h1 className="text-xl font-bold text-[#17212f]">Manual Bank &amp; MM Contacts</h1>
+        <p className="mt-1 text-sm text-[#78818d]">Manage a separate contact list for manual bank and MM payment records. These contacts are not added to the main customer directory.</p>
       </div>
       {canWrite && <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" onClick={() => { setShowImport(true); setImportError(""); }}><Upload size={15} /> Import Excel</Button>
@@ -280,7 +280,7 @@ export function ManualMomoContacts({ canWrite }: { canWrite: boolean }) {
     <Card>
       <CardHeader className="flex flex-wrap items-end justify-between gap-3">
         <div><CardTitle>Saved contacts</CardTitle><p className="mt-1 text-xs text-[#7c8793]">{contacts.length} contact{contacts.length === 1 ? "" : "s"}</p></div>
-        <input aria-label="Search Manual Bank & MOMO contacts" placeholder="Search contacts" value={query} onChange={(event) => setQuery(event.target.value)} className={`${inputClass} max-w-xs`} />
+        <input aria-label="Search Manual Bank & MM contacts" placeholder="Search contacts" value={query} onChange={(event) => setQuery(event.target.value)} className={`${inputClass} max-w-xs`} />
       </CardHeader>
       <CardContent>
         {loading ? <p className="py-6 text-center text-sm text-[#7c8793]">Loading contacts…</p> : <div className="overflow-x-auto">
@@ -300,7 +300,7 @@ export function ManualMomoContacts({ canWrite }: { canWrite: boolean }) {
     {showImport && canWrite && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#0c1521]/50 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) closeImport(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="manual-momo-contact-import-title" className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#e8ebef] bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,.24)] sm:p-6">
         <div className="flex items-start justify-between gap-4">
-          <div><h2 id="manual-momo-contact-import-title" className="text-xl font-bold text-[#17212f]">Import Manual Bank &amp; MOMO contacts</h2><p className="mt-1 text-sm text-[#637083]">Contact Name is required. Existing and repeated phone numbers are skipped.</p></div>
+          <div><h2 id="manual-momo-contact-import-title" className="text-xl font-bold text-[#17212f]">Import Manual Bank &amp; MM contacts</h2><p className="mt-1 text-sm text-[#637083]">Contact Name is required. Existing and repeated phone numbers are skipped.</p></div>
           <button type="button" onClick={closeImport} aria-label="Close contact import" disabled={importBusy} className="rounded-md p-1 text-[#74808d] hover:bg-[#f3f4f6] disabled:opacity-50"><X size={16} /></button>
         </div>
         <div className="mt-5 space-y-4">
@@ -327,6 +327,6 @@ export function ManualMomoContacts({ canWrite }: { canWrite: boolean }) {
       </section>
     </div>}
 
-    <ConfirmDialog open={Boolean(pendingDelete)} title="Delete Manual Bank & MOMO contact?" description={`This will permanently remove ${pendingDelete?.name ?? "this contact"} from the separate contact list. Existing payment entries keep their recorded name and phone.`} confirmLabel="Delete contact" destructive busy={deleteBusy} onConfirm={() => void deleteContact()} onCancel={() => setPendingDelete(null)} />
+    <ConfirmDialog open={Boolean(pendingDelete)} title="Delete Manual Bank & MM contact?" description={`This will permanently remove ${pendingDelete?.name ?? "this contact"} from the separate contact list. Existing payment entries keep their recorded name and phone.`} confirmLabel="Delete contact" destructive busy={deleteBusy} onConfirm={() => void deleteContact()} onCancel={() => setPendingDelete(null)} />
   </div>;
 }

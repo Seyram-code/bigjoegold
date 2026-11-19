@@ -98,7 +98,7 @@ export async function POST(request: Request) {
     const user = await requireUser("payments:write");
     const input = manualMomoEntrySchema.parse(await readJson(request));
     const account = await prisma.manualMomoAccount.findUnique({ where: { id: input.accountId } });
-    if (!account) throw new HttpError("The selected Manual Bank & MOMO account is unavailable", 409);
+    if (!account) throw new HttpError("The selected Manual Bank & MM account is unavailable", 409);
 
     const transactionDate = new Date(input.transactionDate);
     if (transactionDate < account.openingDate) {

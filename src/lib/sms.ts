@@ -36,7 +36,7 @@ function compact(value: string) { return value.replace(/\s+/g, " ").trim(); }
 function smsSafeText(value: string) {
   return compact(value.normalize("NFKD").replace(/\p{M}/gu, "").replace(/[^A-Za-z0-9 .,;:!?()'&+/-]/g, "?"));
 }
-function paymentMethodLabel(method: string) { return method.replaceAll("_", " ").toLowerCase(); }
+function paymentMethodLabel(method: string) { return method === "MOBILE_MONEY" ? "MM" : method.replaceAll("_", " ").toLowerCase(); }
 function ghanaDateTime(value: Date) {
   return new Intl.DateTimeFormat("en-GH", {
     dateStyle: "medium",
@@ -81,7 +81,7 @@ export function manualMomoTransactionSms(notification: ManualMomoSms) {
   const transactionReference = notification.transactionReference
     ? ` Transaction ref: ${notification.transactionReference}.`
     : "";
-  return compact(`BJG Manual Bank & MOMO ${notification.direction.toLowerCase()} ${notification.reference}: ${formatCurrencyExact(notification.amount)} on ${notification.accountName} (${paymentMethodLabel(notification.accountType)}). Customer: ${notification.customerName}.${transactionReference} Date: ${ghanaDateTime(notification.transactionDate)}. By: ${notification.recordedBy}.`);
+  return compact(`BJG Manual Bank & MM ${notification.direction.toLowerCase()} ${notification.reference}: ${formatCurrencyExact(notification.amount)} on ${notification.accountName} (${paymentMethodLabel(notification.accountType)}). Customer: ${notification.customerName}.${transactionReference} Date: ${ghanaDateTime(notification.transactionDate)}. By: ${notification.recordedBy}.`);
 }
 
 export function loginNotificationSms(notification: LoginSms) {
@@ -117,7 +117,7 @@ export async function sendOwnerManualMomoSms(notification: ManualMomoSms) {
   try {
     await sendOwnerSms(manualMomoTransactionSms(notification));
   } catch (error) {
-    console.error("Manual Bank & MOMO transaction was recorded, but its owner SMS could not be prepared.", error);
+    console.error("Manual Bank & MM transaction was recorded, but its owner SMS could not be prepared.", error);
   }
 }
 
