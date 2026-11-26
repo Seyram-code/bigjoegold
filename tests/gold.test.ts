@@ -21,7 +21,7 @@ import { calculateCashBalances, calculateRunningCashBalances } from "../src/lib/
 import { adjustSaleAllocations } from "../src/lib/sales-allocation";
 import { calculateAvailableInventoryMeasurementTotals, calculateInventoryAverageKarat, calculateReceivedMeasurementTotals, calculateSoldDownWeight } from "../src/lib/dashboard-metrics";
 import { buildManualMomoAccountSummaries, buildManualMomoStatement } from "../src/lib/manual-momo";
-import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateCombinedFinancingNetBalance, calculateNetProfit, calculateProfitMetrics } from "../src/lib/reporting";
+import { buildDailyBuyerFinancingSummary, buildDailyMansoBranchSummary, buildDailySupplierPurchaseSummary, calculateCombinedFinancingNetBalance, calculateNetProfit, calculateProfitMetrics, splitDailyFinancingPositions } from "../src/lib/reporting";
 import { calculateMansoBranchPurchase } from "../src/lib/manso-branch";
 import { customerAdvanceSchema, expenseSchema, financeAccountSchema, financeMovementSchema, financeSettingsSchema, manualMomoAccountCreateSchema, manualMomoAccountSchema, manualMomoEntrySchema, mansoBranchActionSchema, purchaseFormulaSettingsSchema } from "../src/lib/validation";
 
@@ -59,6 +59,26 @@ test("profit reports use the allocated receiving cost for full and partial sales
 test("net profit subtracts only approved expenses from gross profit in pesewas", () => {
   assert.equal(calculateNetProfit(69575.12, ["100.10", "20.02"]), 69455);
   assert.equal(calculateNetProfit(null, ["10.00"]), null);
+});
+
+test("daily financing summary separates receivables and payables using each account's sign convention", () => {
+  const positions = splitDailyFinancingPositions([
+    { customerId: "supplier", customer: "Supplier", customerKind: "SUPPLIER", type: "Customer gold advance", accountReference: "ADV-1", balance: -250 },
+    { customerId: "supplier-credit", customer: "Supplier credit", customerKind: "SUPPLIER", type: "Customer gold advance", accountReference: "ADV-2", balance: 75 },
+    { customerId: "buyer-credit", customer: "Buyer credit", customerKind: "BUYER", type: "Customer gold advance", accountReference: "ADV-3", balance: 125 },
+    { customerId: "buyer", customer: "Buyer", customerKind: "BUYER", type: "Buyer gold financing", accountReference: "BFA-1", balance: 600 },
+    { customerId: "buyer-refund", customer: "Buyer refund", customerKind: "BUYER", type: "Buyer gold financing", accountReference: "BFA-2", balance: -40 },
+    { customerId: "settled", customer: "Settled", customerKind: "BUYER", type: "Buyer gold financing", accountReference: "BFA-3", balance: 0 },
+  ]);
+  assert.deepEqual(positions.receivables.map(({ customer, amount }) => [customer, amount]), [
+    ["Supplier", 250],
+    ["Buyer", 600],
+  ]);
+  assert.deepEqual(positions.payables.map(({ customer, amount }) => [customer, amount]), [
+    ["Supplier credit", 75],
+    ["Buyer credit", 125],
+    ["Buyer refund", 40],
+  ]);
 });
 
 test("Manso branch gold uses measured purity and entered cost without board pricing", () => {
@@ -836,7 +856,7 @@ test("finance running balances follow transaction date and exclude unapproved mo
   assert.equal(balances.get("pending")?.toFixed(2), "50.00");
 });
 
-test("finance validation covers account metadata, movements, and optional approval thresholds", () => {
+test("finance validation covers account metadata, movements, and optional approval thresholds", async (t) => {
   const account = {
     name: "Main cash",
     type: "CASH",
@@ -868,7 +888,7 @@ test("finance validation covers account metadata, movements, and optional approv
     adjustmentApprovalThreshold: "1000.00",
   });
 
-  test("expense validation requires a GHS amount, valid category, date, and details", () => {
+  await t.test("expense validation requires a GHS amount, valid category, date, and details", () => {
     const expense = {
       accountId: "cash-account-1",
       category: "OTHER",
@@ -882,7 +902,7 @@ test("finance validation covers account metadata, movements, and optional approv
     assert.equal(expenseSchema.safeParse({ ...expense, description: "" }).success, false);
   });
 
-  test("manual MOMO validation keeps wallet payments and opening balances constrained", () => {
+  await t.test("manual MOMO validation keeps wallet payments and opening balances constrained", () => {
     const entry = {
       accountId: "manual-momo-account-1",
       direction: "INBOUND",
@@ -945,7 +965,7 @@ test("finance validation covers account metadata, movements, and optional approv
     }).success, false);
   });
 
-  test("manual MOMO statements calculate opening, period, and running balances independently", () => {
+  await t.test("manual MOMO statements calculate opening, period, and running balances independently", () => {
     const firstPeriod = buildManualMomoStatement({
       openingBalance: 500,
       openingDate: "2026-10-01T00:00:00.000Z",
@@ -1000,7 +1020,7 @@ test("finance validation covers account metadata, movements, and optional approv
     assert.equal(nextPeriod.rows.length, 1);
   });
 
-  test("manual Bank and MOMO close summaries calculate each ledger independently", () => {
+  await t.test("manual Bank and MOMO close summaries calculate each ledger independently", () => {
     const accounts = [
       { id: "momo", name: "MTN Wallet", type: "MOBILE_MONEY" as const, bankNameTelco: "MTN", accountNumber: "0240000000", openingBalance: 250, openingDate: "2026-10-01T00:00:00.000Z", balanceBeforePeriod: 300 },
       { id: "bank", name: "Main Bank", type: "BANK" as const, bankNameTelco: "Bank", accountNumber: "123456", openingBalance: 1000, openingDate: "2026-10-01T00:00:00.000Z", balanceBeforePeriod: 1200 },

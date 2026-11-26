@@ -48,8 +48,32 @@ type FinancingStatement = {
   netBalance?: number;
   rows: StatementRow[];
 };
+type DailySummaryPosition = {
+  customerId: string;
+  customer: string;
+  customerKind: "BUYER" | "SUPPLIER";
+  type: "Customer gold advance" | "Buyer gold financing";
+  accountReference: string;
+  amount: number;
+};
+type DailySummaryData = {
+  asOfDate: string;
+  generatedAt: string;
+  trackedCashAccounts: Array<{ id: string; name: string; type: string; currency: string; balance: number }>;
+  manualAccounts: Array<{ id: string; name: string; type: string; currency: string; balance: number }>;
+  receivables: DailySummaryPosition[];
+  payables: DailySummaryPosition[];
+  inventory: {
+    kilograms: number;
+    costValue: number;
+    marketValue: number | null;
+    batchCount: number;
+    boardPrice: { amount: number; currency: string; unit: string; effectiveAt: string } | null;
+  };
+};
 type ReportData = {
   period: { from: string; to: string };
+  dailySummaryAvailable: boolean;
   totals: {
     sales: number;
     purchases: number;
@@ -91,10 +115,11 @@ type Column = {
   label: string;
   format?: "currency" | "kg" | "grams" | "date" | "day" | "percent";
 };
-type TabId = "overview" | "trading" | "inventory" | "customers" | "customer-advances" | "buyer-financing" | "combined-financing" | "payments" | "payment-methods" | "cash-flow" | "expenses" | "movements" | "staff" | "board";
+type TabId = "overview" | "daily-summary" | "trading" | "inventory" | "customers" | "customer-advances" | "buyer-financing" | "combined-financing" | "payments" | "payment-methods" | "cash-flow" | "expenses" | "movements" | "staff" | "board";
 
 const tabs: Array<{ id: TabId; label: string }> = [
   { id: "overview", label: "Overview" },
+  { id: "daily-summary", label: "Daily summary" },
   { id: "trading", label: "Purchases & sales" },
   { id: "inventory", label: "Current stock" },
   { id: "customers", label: "Customer history" },
@@ -135,6 +160,49 @@ function displayValue(value: unknown, format?: Column["format"]) {
   if (format === "day") return new Date(String(value)).toLocaleDateString("en-GH", { dateStyle: "medium", timeZone: "UTC" });
   if (format === "percent") return `${formatDecimalTruncated(Number(value) * 100, 2)}%`;
   return text(value);
+}
+
+function summaryCurrency(value: number, currencyCode: string) {
+  return formatCurrency(value, { currency: currencyCode, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function accountTypeLabel(type: string) {
+  if (type === "MOBILE_MONEY") return "Mobile money";
+  if (type === "BANK") return "Bank";
+  if (type === "CASH") return "Cash";
+  return type;
+}
+
+function DailyPositionTable({ title, positions }: { title: string; positions: DailySummaryPosition[] }) {
+  const total = positions.reduce((sum, position) => sum + position.amount, 0);
+  return <Card>
+    <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+    <CardContent>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-left text-xs">
+          <thead><tr className="border-b border-[#dfe4e9] text-[#637083]">
+            <th className="py-2 pr-3">Customer / supplier</th>
+            <th className="py-2 pr-3">Position type</th>
+            <th className="py-2 pr-3">Account</th>
+            <th className="py-2 text-right">Amount (GHS)</th>
+          </tr></thead>
+          <tbody>
+            {positions.map((position) => <tr key={`${position.customerId}:${position.type}:${position.accountReference}`} className="border-b border-[#edf0f3]">
+              <td className="py-2 pr-3">{position.customer} <span className="text-[#89929d]">({position.customerKind === "SUPPLIER" ? "Supplier" : "Customer"})</span></td>
+              <td className="py-2 pr-3">{position.type}</td>
+              <td className="py-2 pr-3">{position.accountReference}</td>
+              <td className="py-2 text-right font-semibold">{currency(position.amount)}</td>
+            </tr>)}
+            {!positions.length && <tr><td colSpan={4} className="py-5 text-center text-[#89929d]">No outstanding balances in this section.</td></tr>}
+          </tbody>
+          {positions.length > 0 && <tfoot><tr className="border-t-2 border-[#dfe4e9] font-semibold">
+            <td colSpan={3} className="py-2 pr-3">Section total</td>
+            <td className="py-2 text-right">{currency(total)}</td>
+          </tr></tfoot>}
+        </table>
+      </div>
+    </CardContent>
+  </Card>;
 }
 
 function combinedBalanceRows(row: ReportRow) {
@@ -468,7 +536,7 @@ function buildSheets(data: ReportData, groupedTrades: ReportRow[]): ExcelSheet[]
   return sheets;
 }
 
-function printReportSummary(target: "financing-summary" | "manso-summary") {
+function printReportSummary(target: "financing-summary" | "manso-summary" | "daily-summary") {
   const clearPrintTarget = () => {
     delete document.body.dataset.printTarget;
   };
@@ -497,6 +565,11 @@ export function ReportsDashboard() {
   const [statementLoading, setStatementLoading] = useState(false);
   const [statementError, setStatementError] = useState("");
   const statementRequestId = useRef(0);
+  const [summaryDate, setSummaryDate] = useState(now.toISOString().slice(0, 10));
+  const [dailySummaryReloadKey, setDailySummaryReloadKey] = useState(0);
+  const [dailySummary, setDailySummary] = useState<DailySummaryData | null>(null);
+  const [dailySummaryLoading, setDailySummaryLoading] = useState(false);
+  const [dailySummaryError, setDailySummaryError] = useState("");
 
   async function openCustomer(customerId: string) {
     setCustomerDetail(null);
@@ -775,7 +848,39 @@ export function ReportsDashboard() {
   }, [from, to]);
 
   useEffect(() => { void load(); }, [load]);
-  useAutoRefresh(() => load(true));
+  useAutoRefresh(() => {
+    void load(true);
+    if (activeTab === "daily-summary") setDailySummaryReloadKey((key) => key + 1);
+  });
+  useEffect(() => {
+    if (activeTab !== "daily-summary" || !data?.dailySummaryAvailable) return;
+    const controller = new AbortController();
+    setDailySummaryLoading(true);
+    setDailySummaryError("");
+    void (async () => {
+      try {
+        const response = await fetch(`/api/reports/daily-summary?date=${encodeURIComponent(summaryDate)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const body: unknown = await response.json();
+        if (!response.ok) {
+          const message = body && typeof body === "object" && "error" in body
+            ? String(body.error)
+            : "Unable to load the daily summary";
+          throw new Error(message);
+        }
+        setDailySummary(body as DailySummaryData);
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setDailySummaryError(cause instanceof Error ? cause.message : "Unable to load the daily summary");
+        }
+      } finally {
+        if (!controller.signal.aborted) setDailySummaryLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [activeTab, data?.dailySummaryAvailable, dailySummaryReloadKey, summaryDate]);
 
   const groupedTrades = useMemo(() => groupTradeTotals((data?.trades ?? []).map((trade) => ({
     transactionDate: String(trade.transactionDate),
@@ -812,6 +917,7 @@ export function ReportsDashboard() {
   }, [data?.inventory, inventorySearch]);
 
   const visibleTabs = tabs.filter((tab) => {
+    if (tab.id === "daily-summary") return data?.dailySummaryAvailable === true;
     if (tab.id === "inventory" || tab.id === "movements") return data?.inventory !== null;
     if (tab.id === "payments") return data?.payments !== null;
     if (tab.id === "expenses") return data?.expenses !== null;
@@ -896,6 +1002,115 @@ export function ReportsDashboard() {
       </div>
       <p className="rounded-lg border border-[#e8ebef] bg-white px-4 py-3 text-xs leading-5 text-[#63707e]">{data.profitAvailability.explanation} {data.profitAvailability.method}</p>
     </>;
+  } else if (data && activeTab === "daily-summary") {
+    const renderAccountBalances = (
+      title: string,
+      source: string,
+      accounts: DailySummaryData["trackedCashAccounts"],
+    ) => {
+      const byCurrency = new Map<string, number>();
+      for (const account of accounts) {
+        byCurrency.set(account.currency, (byCurrency.get(account.currency) ?? 0) + account.balance);
+      }
+      return <Card>
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+          <p className="text-xs text-[#7c8793]">{source}. Balances are shown separately by currency.</p>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-left text-xs">
+              <thead><tr className="border-b border-[#dfe4e9] text-[#637083]">
+                <th className="py-2 pr-3">Account</th>
+                <th className="py-2 pr-3">Type</th>
+                <th className="py-2 pr-3">Currency</th>
+                <th className="py-2 text-right">Balance</th>
+              </tr></thead>
+              <tbody>
+                {accounts.map((account) => <tr key={account.id} className="border-b border-[#edf0f3]">
+                  <td className="py-2 pr-3">{account.name}</td>
+                  <td className="py-2 pr-3">{accountTypeLabel(account.type)}</td>
+                  <td className="py-2 pr-3">{account.currency}</td>
+                  <td className="py-2 text-right font-semibold">{summaryCurrency(account.balance, account.currency)}</td>
+                </tr>)}
+                {!accounts.length && <tr><td colSpan={4} className="py-5 text-center text-[#89929d]">No accounts recorded as of this date.</td></tr>}
+              </tbody>
+              {byCurrency.size > 0 && <tfoot><tr className="border-t-2 border-[#dfe4e9] font-semibold">
+                <td colSpan={3} className="py-2 pr-3">Balance totals by currency</td>
+                <td className="py-2 text-right">{[...byCurrency].map(([currencyCode, amount]) => `${summaryCurrency(amount, currencyCode)} ${currencyCode}`).join(" · ")}</td>
+              </tr></tfoot>}
+            </table>
+          </div>
+        </CardContent>
+      </Card>;
+    };
+
+    reportContent = dailySummaryLoading && !dailySummary
+      ? <p className="text-sm text-[#7c8793]">Loading daily balances…</p>
+      : dailySummaryError
+        ? <AlertDialog open title="Daily summary error" description={dailySummaryError} onConfirm={() => setDailySummaryError("")} />
+        : dailySummary
+          ? <section className="daily-summary-print-root space-y-4 rounded-xl border border-[#e8ebef] bg-white p-4 sm:p-6">
+            <header className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-[#bc8c36] pb-4">
+              <div>
+                <p className="text-lg font-black tracking-[.12em] text-[#17212f]">BIG JOE GOLD</p>
+                <h2 className="mt-2 text-xl font-semibold text-[#17212f]">Daily Financial &amp; Stock Summary</h2>
+                <p className="mt-1 text-sm text-[#637083]">As of {new Date(`${dailySummary.asOfDate}T00:00:00.000Z`).toLocaleDateString("en-GH", { dateStyle: "long", timeZone: "UTC" })}</p>
+                <p className="mt-1 text-xs text-[#89929d]">Generated {date(dailySummary.generatedAt)}</p>
+              </div>
+              <div className="daily-summary-controls flex flex-wrap items-center gap-2">
+                <label htmlFor="daily-summary-date" className="text-xs font-medium text-[#637083]">Summary date</label>
+                <input
+                  id="daily-summary-date"
+                  type="date"
+                  value={summaryDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(event) => setSummaryDate(event.target.value)}
+                  className="h-9 rounded-lg border border-[#dfe4e9] bg-white px-3 text-xs"
+                />
+                <Button type="button" variant="gold" size="sm" onClick={() => printReportSummary("daily-summary")} disabled={dailySummaryLoading}><Printer size={14} /> Print / Save PDF</Button>
+              </div>
+            </header>
+            {dailySummaryLoading && <p className="text-xs text-[#89929d]">Updating summary…</p>}
+            <div className="space-y-4">
+              {renderAccountBalances("Tracked cash, bank & mobile money balances", "Finance ledger", dailySummary.trackedCashAccounts)}
+              {renderAccountBalances("Manual cash, bank & mobile money balances", "Manual tracking ledger", dailySummary.manualAccounts)}
+              <DailyPositionTable
+                title="Customers who owe Big Joe"
+                positions={dailySummary.receivables.filter((position) => position.customerKind === "BUYER")}
+              />
+              <DailyPositionTable
+                title="Suppliers who owe Big Joe"
+                positions={dailySummary.receivables.filter((position) => position.customerKind === "SUPPLIER")}
+              />
+              <DailyPositionTable
+                title="Amounts Big Joe owes customers"
+                positions={dailySummary.payables.filter((position) => position.customerKind === "BUYER")}
+              />
+              <DailyPositionTable
+                title="Amounts Big Joe owes suppliers"
+                positions={dailySummary.payables.filter((position) => position.customerKind === "SUPPLIER")}
+              />
+              <Card>
+                <CardHeader><CardTitle>Gold stock on selected date and price equivalent</CardTitle></CardHeader>
+                <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <Metric label="Stock on hand" value={weight(dailySummary.inventory.kilograms)} />
+                  <Metric label="Recorded cost value" value={currency(dailySummary.inventory.costValue)} />
+                  <Metric label="Indicative selling-price value" value={dailySummary.inventory.marketValue === null ? "Unavailable" : currency(dailySummary.inventory.marketValue)} />
+                  <Metric label="Stock batches" value={String(dailySummary.inventory.batchCount)} />
+                </CardContent>
+                <div className="px-6 pb-5 text-xs leading-5 text-[#637083]">
+                  <p>
+                  {dailySummary.inventory.boardPrice
+                    ? <>Indicative value uses the selling board price of {summaryCurrency(dailySummary.inventory.boardPrice.amount, dailySummary.inventory.boardPrice.currency)} per pure gram, effective {date(dailySummary.inventory.boardPrice.effectiveAt)}. Stock is valued using each batch&apos;s recorded purity. Cost value is based on recorded batch costs.</>
+                    : "No compatible selling-board price was in effect for this date; the indicative value is unavailable."}
+                  </p>
+                  <p className="mt-1">Account balances and stock movements are reconstructed through the end of the selected date.</p>
+                </div>
+              </Card>
+            </div>
+          </section>
+          : <p className="text-sm text-[#7c8793]">Select a date to load the daily summary.</p>;
   } else if (data && activeTab === "trading") {
     reportContent = <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1231,11 +1446,14 @@ export function ReportsDashboard() {
     ["Notes", "notes"],
   ];
 
-  return <div className="space-y-6">
+  return <div className={activeTab === "daily-summary" ? "daily-summary-page space-y-6" : "space-y-6"}>
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div><p className="text-xs font-medium text-[#8b949e]">Workspace / Reports</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-[#17212f]">Reports</h1><p className="mt-1.5 text-sm text-[#76808c]">Database-backed gold trading, inventory, finance, and operations reports.</p></div>
       <div className="report-controls flex flex-wrap items-center gap-2">
-        <RefreshButton loading={loading} onClick={() => void load()} />
+        <RefreshButton loading={loading} onClick={() => {
+          void load();
+          if (activeTab === "daily-summary") setDailySummaryReloadKey((key) => key + 1);
+        }} />
         <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!data}><Printer size={14} /> Save PDF</Button>
         <Button variant="gold" size="sm" onClick={exportExcel} disabled={!data}><Download size={14} /> Export Excel</Button>
       </div>

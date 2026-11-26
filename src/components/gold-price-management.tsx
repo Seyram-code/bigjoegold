@@ -16,6 +16,7 @@ import { formatPriceAmount } from "@/lib/formatters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { boardPriceSchema } from "@/lib/validation";
 import { useToast } from "@/components/ui/toast-provider";
+import { notifyBoardPricesUpdated } from "@/lib/board-price-events";
 
 type BoardPrice = {
   id: string;
@@ -103,6 +104,7 @@ export function GoldPriceManagement({ section, canWrite }: { section: Section; c
       });
       const body = await response.json() as { error?: string };
       if (!response.ok) throw new Error(body.error || "Could not publish the board price");
+      notifyBoardPricesUpdated();
       showToast(`${priceType === "RECEIVING" ? "Receiving" : "Selling"} board price published successfully.`);
       setConfirming(false);
       setPriceAmount("");

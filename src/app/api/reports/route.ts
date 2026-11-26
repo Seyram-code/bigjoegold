@@ -603,6 +603,7 @@ export async function GET(request: Request) {
 
     return Response.json({
       period: { from: from.toISOString(), to: to.toISOString() },
+      dailySummaryAvailable: readPayments && readInventory && readCustomerDetails,
       totals: {
         sales: salesValue.toNumber(),
         purchases: purchaseValue.toNumber(),

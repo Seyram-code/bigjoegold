@@ -305,11 +305,13 @@ input[type="number"]::-webkit-outer-spin-button {
   html[data-theme="dark"] .statement-print-root,
   html[data-theme="dark"] .account-statement-print-root,
   html[data-theme="dark"] .manual-momo-print-root,
+  html[data-theme="dark"] .daily-summary-print-root,
   html[data-theme="dark"] .report-print-area { color: #14181f !important; background: #fff !important; color-scheme: light; }
   html[data-theme="dark"] .print-page *,
   html[data-theme="dark"] .statement-print-root *,
   html[data-theme="dark"] .account-statement-print-root *,
   html[data-theme="dark"] .manual-momo-print-root *,
+  html[data-theme="dark"] .daily-summary-print-root *,
   html[data-theme="dark"] .report-print-area * { color: #14181f !important; background-color: transparent !important; border-color: #d1d5db !important; }
   body * { visibility: hidden !important; }
   .statement-print-root, .statement-print-root * { visibility: visible !important; }
@@ -349,6 +351,18 @@ input[type="number"]::-webkit-outer-spin-button {
   body[data-print-target="manso-summary"] .manso-summary-print-root,
   body[data-print-target="manso-summary"] .manso-summary-print-root * { visibility: visible !important; }
   .manso-summary-print-root { position: fixed !important; inset: 0 !important; width: 100% !important; height: max-content !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; }
+  body[data-print-target="daily-summary"] * { visibility: hidden !important; }
+  body[data-print-target="daily-summary"] .report-print-area,
+  body[data-print-target="daily-summary"] .report-print-area * { visibility: hidden !important; }
+  body[data-print-target="daily-summary"] .daily-summary-print-root,
+  body[data-print-target="daily-summary"] .daily-summary-print-root * { visibility: visible !important; }
+  body[data-print-target="daily-summary"] .daily-summary-page > *:not(:has(.daily-summary-print-root)),
+  body[data-print-target="daily-summary"] .daily-summary-page > *:has(.daily-summary-print-root) > *:not(:has(.daily-summary-print-root)) { display: none !important; }
+  body[data-print-target="daily-summary"] .daily-summary-page .report-print-area > h2 { display: none !important; }
+  .daily-summary-print-root { position: static !important; inset: auto !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; max-width: none !important; display: block !important; overflow: visible !important; padding: 0 !important; background: #fff !important; border: 0 !important; box-shadow: none !important; break-inside: auto !important; page-break-inside: auto !important; }
+  .daily-summary-controls { display: none !important; }
+  .daily-summary-print-root .rounded-xl { break-inside: auto !important; page-break-inside: auto !important; }
+  .daily-summary-print-root tr { break-inside: avoid; page-break-inside: avoid; }
   body:has(.manual-momo-print-root) * { visibility: hidden !important; }
   body:has(.manual-momo-print-root) .manual-momo-print-root,
   body:has(.manual-momo-print-root) .manual-momo-print-root * { visibility: visible !important; }

@@ -1,5 +1,31 @@
 export type ReportGrouping = "day" | "week" | "month";
 
+export type DailyFinancingBalance = {
+  customerId: string;
+  customer: string;
+  customerKind: "BUYER" | "SUPPLIER";
+  type: "Customer gold advance" | "Buyer gold financing";
+  accountReference: string;
+  balance: number;
+};
+
+export function splitDailyFinancingPositions(accounts: DailyFinancingBalance[]) {
+  const receivables: Array<Omit<DailyFinancingBalance, "balance"> & { amount: number }> = [];
+  const payables: Array<Omit<DailyFinancingBalance, "balance"> & { amount: number }> = [];
+
+  for (const account of accounts) {
+    if (account.balance === 0) continue;
+    const customerOwesBigJoe = account.type === "Buyer gold financing"
+      ? account.balance > 0
+      : account.balance < 0;
+    const { balance, ...position } = account;
+    const row = { ...position, amount: Math.abs(balance) };
+    (customerOwesBigJoe ? receivables : payables).push(row);
+  }
+
+  return { receivables, payables };
+}
+
 export function calculateCombinedFinancingNetBalance(
   supplierAdvanceBalance: number,
   customerAdvanceBalance: number,

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, Coins, FileText, LoaderCircle, Users, WalletCards, X } from "lucide-react";
 import { formatCurrency, formatPriceAmount, formatWeight } from "@/lib/formatters";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
+import { subscribeToBoardPriceUpdates } from "@/lib/board-price-events";
 import { Badge } from "@/components/ui/badge";
 import { SearchInput } from "@/components/ui/search-input";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -130,7 +131,20 @@ export function MarketPriceIndicator() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  useAutoRefresh(refresh);
+  useAutoRefresh(refresh, true, 5000);
+  useEffect(() => {
+    const unsubscribe = subscribeToBoardPriceUpdates(() => { void refresh(); });
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refresh]);
 
   return <>
     <Link

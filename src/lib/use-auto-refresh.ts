@@ -2,9 +2,13 @@
 
 import { useEffect, useRef } from "react";
 
-const AUTO_REFRESH_INTERVAL_MS = 30000;
+const DEFAULT_AUTO_REFRESH_INTERVAL_MS = 30000;
 
-export function useAutoRefresh(callback: () => Promise<void> | void, enabled = true) {
+export function useAutoRefresh(
+  callback: () => Promise<void> | void,
+  enabled = true,
+  intervalMs = DEFAULT_AUTO_REFRESH_INTERVAL_MS,
+) {
   const callbackRef = useRef(callback);
 
   useEffect(() => {
@@ -23,8 +27,8 @@ export function useAutoRefresh(callback: () => Promise<void> | void, enabled = t
         .finally(() => {
           refreshing = false;
         });
-    }, AUTO_REFRESH_INTERVAL_MS);
+    }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [enabled]);
+  }, [enabled, intervalMs]);
 }
