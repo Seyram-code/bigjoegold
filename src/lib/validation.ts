@@ -320,6 +320,7 @@ export const purchaseMeasurementCorrectionSchema = z.object({
   topGrams: purchaseMeasurementGrams,
   downGrams: purchaseMeasurementGrams,
   boardPriceId: z.string().trim().min(1).max(191),
+  transactionDate: pastOrPresentDateTime("Purchase date"),
   reason: inventoryReason,
 }).strict();
 export type PurchaseMeasurementCorrectionInput = z.infer<typeof purchaseMeasurementCorrectionSchema>;

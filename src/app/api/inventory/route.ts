@@ -19,6 +19,7 @@ export async function GET() {
               type: true,
               status: true,
               priceUnit: true,
+              transactionDate: true,
               pricePerGram: true,
               boardPriceId: true,
               purityBps: true,

@@ -106,10 +106,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         || !currentTrade.quantityKg.mul(1000).equals(beforeTopGrams)) {
         throw new HttpError("The saved purchase measurements do not match the batch weight. Reconcile this record before editing.", 409);
       }
+      const transactionDate = new Date(input.transactionDate);
       if (beforeTopGrams.equals(calculated.topGrams)
         && beforeDownGrams.equals(calculated.downGrams)
-        && currentTrade.pricePerGram.equals(boardPrice.priceAmount)) {
-        throw new HttpError("Change a weight or select a different receiving price before saving", 400);
+        && currentTrade.pricePerGram.equals(boardPrice.priceAmount)
+        && currentTrade.transactionDate.getTime() === transactionDate.getTime()) {
+        throw new HttpError("Change a weight, purchase date, or select a different receiving price before saving", 400);
       }
       const delta = grams.minus(balance);
       const newPurityBps = calculated.karat.div(24).mul(10000)
@@ -125,6 +127,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         downGrams: calculated.downGrams.toString(),
         boardPriceId: boardPrice.id,
         boardPrice: boardPrice.priceAmount.toString(),
+        transactionDate: input.transactionDate,
         lastCorrectionReason: input.reason,
         lastCorrectionAt: new Date().toISOString(),
         lastCorrectedBy: user.id,
@@ -138,6 +141,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           pricePerGram: boardPrice.priceAmount,
           boardPriceId: boardPrice.id,
           totalAmount: calculated.amount,
+          transactionDate,
           ...(currentTrade.buyerFinanceSettlement ? { paymentAmount: calculated.amount } : {}),
         },
       });
@@ -155,6 +159,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       await tx.inventoryLot.update({
         where: { id: lot.id },
         data: {
+          receivedAt: transactionDate,
           originalGrams: grams,
           remainingGrams: grams,
           costPerGram: calculated.amount.div(grams).toDecimalPlaces(6),
@@ -162,6 +167,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           density: calculated.density.toDecimalPlaces(8),
           pounds: calculated.pounds.toDecimalPlaces(8),
         },
+      });
+
+      await tx.stockMovement.update({
+        where: { id: receiptMovements[0].id },
+        data: { movementDate: transactionDate },
       });
 
       let correctionReference: string | null = null;
@@ -206,6 +216,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             pricePerGram: currentTrade.pricePerGram.toString(),
             purityBps: currentTrade.purityBps,
             stockGrams: balance.toString(),
+            transactionDate: currentTrade.transactionDate.toISOString(),
           },
           after: {
             topGrams: calculated.topGrams.toString(),
@@ -214,6 +225,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             pricePerGram: updatedTrade.pricePerGram.toString(),
             purityBps: updatedTrade.purityBps,
             stockGrams: grams.toString(),
+            transactionDate: updatedTrade.transactionDate.toISOString(),
           },
           correctionMovement: correctionReference,
         },

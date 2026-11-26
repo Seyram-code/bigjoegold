@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Prisma } from "@prisma/client";
 import { Pencil, X } from "lucide-react";
 import { calculatePurchaseMeasurements } from "@/lib/gold";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,7 @@ type Lot = {
     reference: string;
     type: string;
     status: string;
+    transactionDate: string;
     priceUnit: string;
     boardPriceId: string | null;
     customer: { name: string } | null;
@@ -111,9 +113,8 @@ type StocktakeHistory = Omit<StocktakeSession, "lines"> & {
 export type InventoryView = "opening" | "adjustment" | "transfers" | "current" | "batches" | "movements" | "alerts" | "reconciliation";
 type FormValues = Record<string, string>;
 
-const dateTimeLocal = () => {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+const dateTimeLocal = (date = new Date()) => {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 };
 
 function messageFrom(body: unknown, fallback: string) {
@@ -178,7 +179,7 @@ export function InventoryManagement({
   const [confirmStocktake, setConfirmStocktake] = useState(false);
   const [confirmCancelStocktake, setConfirmCancelStocktake] = useState(false);
   const [editingLot, setEditingLot] = useState<Lot | null>(null);
-  const [measurementForm, setMeasurementForm] = useState({ topGrams: "", downGrams: "", boardPriceId: "", reason: "" });
+  const [measurementForm, setMeasurementForm] = useState({ topGrams: "", downGrams: "", boardPriceId: "", transactionDate: "", reason: "" });
   const stocktakeDirty = useRef(false);
   const [form, setForm] = useState<FormValues>({
     batchNumber: "",
@@ -307,9 +308,10 @@ export function InventoryManagement({
     if (!measurement) return;
     setEditingLot(lot);
     setMeasurementForm({
-      topGrams: String(Number(measurement.topKg) * 1000),
-      downGrams: String(Number(measurement.downKg) * 1000),
+      topGrams: new Prisma.Decimal(String(measurement.topKg)).mul(1000).toString(),
+      downGrams: new Prisma.Decimal(String(measurement.downKg)).mul(1000).toString(),
       boardPriceId: lot.trade?.boardPriceId ?? lot.trade?.boardPrice?.id ?? "",
+      transactionDate: dateTimeLocal(new Date(lot.trade?.transactionDate ?? lot.receivedAt)),
       reason: "",
     });
   }
@@ -323,11 +325,14 @@ export function InventoryManagement({
       const response = await fetch(`/api/inventory/lots/${encodeURIComponent(editingLot.id)}/measurement`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(measurementForm),
+        body: JSON.stringify({
+          ...measurementForm,
+          transactionDate: new Date(measurementForm.transactionDate).toISOString(),
+        }),
       });
       const body: unknown = await response.json();
       if (!response.ok) throw new Error(messageFrom(body, "Unable to correct the purchase measurements"));
-      showToast("Purchase measurements, purchase value, and stock balance were corrected.");
+      showToast("Purchase measurements, value, date, and stock balance were corrected.");
       setEditingLot(null);
       await load();
     } catch (cause) {
@@ -703,13 +708,16 @@ export function InventoryManagement({
           </div>
           <button type="button" aria-label="Close measurement editor" onClick={() => setEditingLot(null)} disabled={busy} className="rounded-lg p-2 text-[#75808d] hover:bg-[#f3f5f7] disabled:opacity-50"><X size={17} /></button>
         </div>
-        <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">Change the top/down weights or select a different published receiving price. The preview recalculates pounds, density, karat, purity, and the purchase amount. Saving also updates cost per gram and stock balance. Existing cash payments remain unchanged; batches with sales or other stock activity must be reconciled separately.</p>
+        <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">Change the top/down weights, purchase date, or published receiving price. The preview recalculates pounds, density, karat, purity, and the purchase amount. Saving also updates cost per gram and stock balance. Existing cash payments remain unchanged; batches with sales or other stock activity must be reconciled separately.</p>
         <form onSubmit={(event) => { void saveMeasurementEdit(event); }} className="mt-4 grid gap-4 sm:grid-cols-2">
           <FormField label="Top weight (grams)" htmlFor="inventory-edit-top-weight">
             <input id="inventory-edit-top-weight" type="number" required min="0.00001" step="0.00001" value={measurementForm.topGrams} onChange={(event) => setMeasurementForm((current) => ({ ...current, topGrams: event.target.value }))} className={fieldControlClass} />
           </FormField>
           <FormField label="Down weight (grams)" htmlFor="inventory-edit-down-weight">
             <input id="inventory-edit-down-weight" type="number" required min="0.00001" step="0.00001" value={measurementForm.downGrams} onChange={(event) => setMeasurementForm((current) => ({ ...current, downGrams: event.target.value }))} className={fieldControlClass} />
+          </FormField>
+          <FormField label="Purchase date and time" htmlFor="inventory-edit-date" className="sm:col-span-2">
+            <CalendarPicker id="inventory-edit-date" includeTime max={dateTimeLocal()} required value={measurementForm.transactionDate} onChange={(transactionDate) => setMeasurementForm((current) => ({ ...current, transactionDate }))} />
           </FormField>
           <FormField label="Receiving price (GHS per pure gram)" htmlFor="inventory-edit-price" className="sm:col-span-2">
             <select id="inventory-edit-price" required value={measurementForm.boardPriceId} onChange={(event) => setMeasurementForm((current) => ({ ...current, boardPriceId: event.target.value }))} className={fieldControlClass}>

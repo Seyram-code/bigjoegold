@@ -10,6 +10,7 @@ test("purchase measurement corrections require valid top/down weights and an aud
     topGrams: "455.25",
     downGrams: "24",
     boardPriceId: "receiving-board-price",
+    transactionDate: "2026-01-15T12:00:00.000Z",
     reason: "Corrected from the current scale reading",
   });
   assert.equal(valid.success, true);
@@ -18,6 +19,7 @@ test("purchase measurement corrections require valid top/down weights and an aud
     topGrams: "455.123456",
     downGrams: "24",
     boardPriceId: "receiving-board-price",
+    transactionDate: "2026-01-15T12:00:00.000Z",
     reason: "Corrected from the current scale reading",
   });
   assert.equal(invalidPrecision.success, false);
@@ -26,9 +28,31 @@ test("purchase measurement corrections require valid top/down weights and an aud
     topGrams: "455",
     downGrams: "24",
     boardPriceId: "receiving-board-price",
+    transactionDate: "2026-01-15T12:00:00.000Z",
     reason: "",
   });
   assert.equal(missingReason.success, false);
+});
+
+test("purchase measurement corrections require a valid non-future purchase date", () => {
+  const base = {
+    topGrams: "455.25",
+    downGrams: "24",
+    boardPriceId: "receiving-board-price",
+    reason: "Corrected from the current scale reading",
+  };
+  assert.equal(purchaseMeasurementCorrectionSchema.safeParse({
+    ...base,
+    transactionDate: "2026-01-15T12:00:00.000Z",
+  }).success, true);
+  assert.equal(purchaseMeasurementCorrectionSchema.safeParse({
+    ...base,
+    transactionDate: "not-a-date",
+  }).success, false);
+  assert.equal(purchaseMeasurementCorrectionSchema.safeParse({
+    ...base,
+    transactionDate: "2999-01-15T12:00:00.000Z",
+  }).success, false);
 });
 
 test("corrected receiving measurements recalculate purchase value and derived purity", () => {
