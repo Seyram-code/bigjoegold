@@ -1092,21 +1092,11 @@ export function ReportsDashboard() {
                 positions={dailySummary.payables.filter((position) => position.customerKind === "SUPPLIER")}
               />
               <Card>
-                <CardHeader><CardTitle>Gold stock on selected date and price equivalent</CardTitle></CardHeader>
-                <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <CardHeader><CardTitle>Gold stock on selected date</CardTitle></CardHeader>
+                <CardContent className="grid gap-4 sm:grid-cols-2">
                   <Metric label="Stock on hand" value={weight(dailySummary.inventory.kilograms)} />
                   <Metric label="Recorded cost value" value={currency(dailySummary.inventory.costValue)} />
-                  <Metric label="Indicative selling-price value" value={dailySummary.inventory.marketValue === null ? "Unavailable" : currency(dailySummary.inventory.marketValue)} />
-                  <Metric label="Stock batches" value={String(dailySummary.inventory.batchCount)} />
                 </CardContent>
-                <div className="px-6 pb-5 text-xs leading-5 text-[#637083]">
-                  <p>
-                  {dailySummary.inventory.boardPrice
-                    ? <>Indicative value uses the selling board price of {summaryCurrency(dailySummary.inventory.boardPrice.amount, dailySummary.inventory.boardPrice.currency)} per pure gram, effective {date(dailySummary.inventory.boardPrice.effectiveAt)}. Stock is valued using each batch&apos;s recorded purity. Cost value is based on recorded batch costs.</>
-                    : "No compatible selling-board price was in effect for this date; the indicative value is unavailable."}
-                  </p>
-                  <p className="mt-1">Account balances and stock movements are reconstructed through the end of the selected date.</p>
-                </div>
               </Card>
             </div>
           </section>
